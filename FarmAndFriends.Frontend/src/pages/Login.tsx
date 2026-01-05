@@ -22,13 +22,8 @@ export default function Login() {
       //alert('Login realizado com sucesso! 🎉')
       login(response.access_token) // Salva o token no contexto de autenticação
       navigate('/game') // Redireciona para a página do jogo
-    } catch (err) {
-
-      console.error(err)
+    } catch (err: any) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido')
-      console.log({ username, password })
-
-      //setError('Username ou senha inválidos')
     } finally {
       setLoading(false)
     }

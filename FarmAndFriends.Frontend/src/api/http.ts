@@ -13,7 +13,7 @@ async function request<T>(
     ...init.headers,
   }
 
-  //console.log('FETCH →', `${API_URL}${input}`)
+  console.log('FETCH →', `${API_URL}${input}`)
 
   const response = await fetch(`${API_URL}${input}`, {
     ...init,
@@ -21,19 +21,20 @@ async function request<T>(
   })
 
   if (!response.ok) {
-    // tenta ler json de erro, se não der cai no text
+    const raw = await response.text()
+
     let message = response.status.toString()
+    
     try {
-      const error = await response.json()
-      message = error.message ?? JSON.stringify(error)
+      const data = JSON.parse(raw)
+      message = data.message || raw
     } catch {
-      message = await response.text()
+      message = raw
     }
 
-    throw new Error(message || response.status.toString())
+    throw new Error(message)
   }
 
-  // ⚠️ Alguns endpoints podem retornar 204 no futuro
   if (response.status === 204) {
     return null as T
   }
