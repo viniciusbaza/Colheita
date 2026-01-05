@@ -1,0 +1,24 @@
+namespace FarmAndFriends.Api.Domain.Entities;
+
+public class Seed
+{
+    public string Id { get; set; } = null!; // ex: "carrot", "corn"
+    public string Name { get; set; } = null!;
+
+    // Economia sell_price >= buy_price * 2 Ou o jogo quebra.
+    public int BuyPrice { get; set; }
+    public int SellPrice { get; set; }
+
+    // Tempo
+    public TimeSpan GrowTime { get; set; }
+
+    // Risco / gameplay
+    public int TheftChancePercent { get; set; } // 0 - 100
+
+    // Progressão
+    public int MinLevel { get; set; } = 1;
+
+    // Retorno por colheita
+    public string CropId { get; set; } = null!;
+    public int CropAmount { get; set; }
+}

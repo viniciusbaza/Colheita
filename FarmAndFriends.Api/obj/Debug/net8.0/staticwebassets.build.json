@@ -1,0 +1,11 @@
+{
+  "Version": 1,
+  "Hash": "2r6GK9DM7fGpr8NJ5sV7dso5dzjNDWvrvMij1lz1K7c=",
+  "Source": "FarmAndFriends.Api",
+  "BasePath": "_content/FarmAndFriends.Api",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": []
+}

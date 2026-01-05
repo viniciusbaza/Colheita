@@ -1,0 +1,89 @@
+using Microsoft.EntityFrameworkCore;
+using FarmAndFriends.Api.Domain.Entities;
+
+namespace FarmAndFriends.Api.Infrastructure.Data;
+
+public class AppDbContext : DbContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options)
+        : base(options) { }
+
+    public DbSet<User> Users => Set<User>();
+    public DbSet<Farm> Farms => Set<Farm>();
+    public DbSet<Plot> Plots => Set<Plot>();
+    public DbSet<Seed> Seeds => Set<Seed>();
+    public DbSet<Inventory> Inventories => Set<Inventory>();
+    public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
+    public DbSet<TheftLog> TheftLogs => Set<TheftLog>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+        
+        modelBuilder.Entity<User>()
+            .Property(u => u.Level)
+            .HasDefaultValue(1);
+
+        modelBuilder.Entity<Plot>()
+            .Ignore(p => p.IsReady);
+
+        modelBuilder.Entity<Seed>()
+            .Property(s => s.GrowTime)
+            .HasConversion(
+                v => v.TotalSeconds,
+                v => TimeSpan.FromSeconds(v)
+            );
+
+        modelBuilder.Entity<Seed>().HasData(
+            new Seed
+            {
+                Id = "carrot",
+                Name = "Cenoura",
+                BuyPrice = 10,
+                SellPrice = 20,
+                GrowTime = TimeSpan.FromMinutes(5),
+                TheftChancePercent = 100,
+                MinLevel = 1,   
+                CropId = "carrot_crop",
+                CropAmount = 1
+            },
+            new Seed
+            {
+                Id = "corn",
+                Name = "Milho",
+                BuyPrice = 20,
+                SellPrice = 45,
+                GrowTime = TimeSpan.FromMinutes(15),
+                TheftChancePercent = 100,
+                MinLevel = 2,
+                CropId = "corn_crop",
+                CropAmount = 3  
+            }
+        );
+
+        modelBuilder.Entity<InventoryItem>(entity =>
+        {
+            entity.HasKey(i => i.Id);
+
+            entity.HasOne(i => i.Inventory)
+                .WithMany(i => i.Items)
+                .HasForeignKey(i => i.InventoryId);
+        });
+
+        modelBuilder.Entity<TheftLog>()
+            .HasIndex(t => new { t.FarmId, t.ThiefUserId, t.CreatedAt });
+
+        modelBuilder.Entity<TheftLog>()
+            .HasOne(t => t.Seed)
+            .WithMany()
+            .HasForeignKey(t => t.SeedId)
+            .OnDelete(DeleteBehavior.Restrict);
+        
+        modelBuilder.Entity<TheftLog>()
+            .HasOne(t => t.Plot)
+            .WithMany()
+            .HasForeignKey(t => t.PlotId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+    }
+}
