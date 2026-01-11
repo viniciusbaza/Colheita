@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using FarmAndFriends.Api.Domain.Entities;
+using System.Security.Cryptography;
 
 namespace FarmAndFriends.Api.Infrastructure.Auth;
 
@@ -14,6 +15,11 @@ public class TokenService
     public TokenService(IOptions<JwtSettings> settings)
     {
         _settings = settings.Value;
+    }
+
+    public string GenerateRefreshToken()
+    {
+        return Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
     }
 
     public string GenerateToken(User user)

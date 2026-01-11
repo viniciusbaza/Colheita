@@ -87,6 +87,28 @@ namespace FarmAndFriends.Api.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "RefreshTokens",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Token = table.Column<string>(type: "text", nullable: false),
+                    ExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    Revoked = table.Column<bool>(type: "boolean", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_RefreshTokens", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_RefreshTokens_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Plots",
                 columns: table => new
                 {
@@ -138,10 +160,11 @@ namespace FarmAndFriends.Api.Migrations
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     FarmId = table.Column<Guid>(type: "uuid", nullable: false),
+                    PlotId = table.Column<Guid>(type: "uuid", nullable: false),
                     ThiefUserId = table.Column<Guid>(type: "uuid", nullable: false),
                     SeedId = table.Column<string>(type: "text", nullable: false),
-                    PlotId = table.Column<Guid>(type: "uuid", nullable: false),
                     Quantity = table.Column<int>(type: "integer", nullable: false),
+                    GotBonus = table.Column<bool>(type: "boolean", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
@@ -203,6 +226,11 @@ namespace FarmAndFriends.Api.Migrations
                 column: "FarmId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_RefreshTokens_UserId",
+                table: "RefreshTokens",
+                column: "UserId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_TheftLogs_FarmId_ThiefUserId_CreatedAt",
                 table: "TheftLogs",
                 columns: new[] { "FarmId", "ThiefUserId", "CreatedAt" });
@@ -228,6 +256,9 @@ namespace FarmAndFriends.Api.Migrations
         {
             migrationBuilder.DropTable(
                 name: "InventoryItems");
+
+            migrationBuilder.DropTable(
+                name: "RefreshTokens");
 
             migrationBuilder.DropTable(
                 name: "TheftLogs");

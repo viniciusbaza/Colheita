@@ -1,24 +1,13 @@
 import { useEffect, useRef } from 'react'
 import Phaser from 'phaser'
+import FarmScene from './scenes/FarmScene'
+import type { Farm } from '../types/Farm'
 
-class MainScene extends Phaser.Scene {
-  constructor() {
-    super('MainScene')
-  }
-
-  create() {
-    this.add.text(50, 50, '🌾 Farm And Friends', {
-      color: '#ffffff',
-      fontSize: '24px',
-    })
-
-    this.add.text(50, 90, 'Phaser integrado com React!', {
-      color: '#ffffaa',
-    })
-  }
+type Props = {
+  farm: Farm
 }
 
-export function usePhaserGame(containerId: string) {
+export function usePhaserGame(containerId: string, { farm }: Props) {
   const gameRef = useRef<Phaser.Game | null>(null)
 
   useEffect(() => {
@@ -27,10 +16,10 @@ export function usePhaserGame(containerId: string) {
     gameRef.current = new Phaser.Game({
       type: Phaser.AUTO,
       parent: containerId,
-      width: 800,
-      height: 450,
-      backgroundColor: '#2f855a',
-      scene: MainScene,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      backgroundColor: '#87CEEB',
+      scene: new FarmScene(farm),
     })
 
     return () => {

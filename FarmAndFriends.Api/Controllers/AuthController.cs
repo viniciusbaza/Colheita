@@ -4,6 +4,7 @@ using FarmAndFriends.Api.Infrastructure.Data;
 using FarmAndFriends.Api.Infrastructure.Auth;
 using FarmAndFriends.Api.Domain.Entities;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authorization;
 
 namespace FarmAndFriends.Api.Controllers;
 
@@ -19,6 +20,8 @@ public class AuthController : ControllerBase
         _context = context;
         _tokenService = tokenService;
     }
+
+    public record LoginRequest(string Username, string Password);
 
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
@@ -40,15 +43,45 @@ public class AuthController : ControllerBase
         if (result == PasswordVerificationResult.Failed)
             return Unauthorized("Usuário ou senha inválidos");
 
-        var token = _tokenService.GenerateToken(user);
+        // 🔐 Access token
+        var accessToken = _tokenService.GenerateToken(user);
+        // 🔁 Refresh token
+        var refreshToken = _tokenService.GenerateRefreshToken();;
+
+        _context.RefreshTokens.Add(
+            new RefreshToken
+            {
+                Id = Guid.NewGuid(),
+                UserId = user.Id,
+                Token = refreshToken,
+                ExpiresAt = DateTime.UtcNow.AddDays(7),
+                Revoked = false
+            }
+        );
+
+        await _context.SaveChangesAsync();
+
+        // 🍪 Cookie HttpOnly
+        Response.Cookies.Append(
+            "refresh_token",
+            refreshToken,
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = HttpContext.Request.IsHttps, // true em produção HTTPS
+                SameSite = SameSiteMode.Lax,
+                Expires = DateTime.UtcNow.AddDays(7)
+            }
+        );
 
         return Ok(new
         {
-            access_token = token
+            access_token = accessToken,
+           // refresh_token = refreshToken
         });
     }
 
-    public record RegisterRequest(string Username, string Password);
+    public record RegisterRequest(string Username, string Password, string FarmName);
 
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request)
@@ -69,11 +102,17 @@ public class AuthController : ControllerBase
 
         user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
 
+        if (string.IsNullOrWhiteSpace(request.FarmName))
+            return BadRequest("Nome da fazenda é obrigatório");
+        
+        if (request.FarmName.Length > 30)
+            return BadRequest("Nome da fazenda muito longo");
+
         // 🏡 Criar Farm inicial
         var farm = new Farm
         {
             Id = Guid.NewGuid(),
-            Name = "Minha Fazenda",
+            Name = request.FarmName,
             UserId = user.Id
         };
 
@@ -126,6 +165,78 @@ public class AuthController : ControllerBase
         });
     }
 
-}
+    //public record RefreshRequest(string RefreshToken);
+    [AllowAnonymous]
+    [HttpPost("refresh")]
+    public async Task<IActionResult> Refresh()
+    {
+        if (!Request.Cookies.TryGetValue("refresh_token", out var refreshToken))
+            return Unauthorized("Refresh token não fornecido");
 
-public record LoginRequest(string Username, string Password);
+        var storedToken = await _context.RefreshTokens
+            .Include(r => r.User)
+            .FirstOrDefaultAsync(r =>
+                r.Token == refreshToken &&
+                !r.Revoked &&
+                r.ExpiresAt > DateTime.UtcNow
+            );
+
+        if (storedToken == null)
+            return Unauthorized("Refresh token inválido");
+
+        // 🔒 Revoga o token antigo
+        storedToken.Revoked = true;
+
+        // 🔁 Gera novos tokens
+        var newAccessToken = _tokenService.GenerateToken(storedToken.User);
+        var newRefreshTokenValue = _tokenService.GenerateRefreshToken();
+
+        _context.RefreshTokens.Add(new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = storedToken.UserId,
+            Token = newRefreshTokenValue,
+            ExpiresAt = DateTime.UtcNow.AddDays(7)
+        });
+
+        await _context.SaveChangesAsync();
+
+        // 🍪 Atualiza cookie
+        Response.Cookies.Append(
+            "refresh_token",
+            newRefreshTokenValue,
+            new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = HttpContext.Request.IsHttps, // true em produção HTTPS
+                SameSite = SameSiteMode.Lax,
+                Expires = DateTime.UtcNow.AddDays(7)
+            }
+        );
+
+        return Ok(new
+        {
+            access_token = newAccessToken
+        });
+    }
+
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        if (Request.Cookies.TryGetValue("refresh_token", out var token))
+        {
+            var stored = await _context.RefreshTokens
+                .FirstOrDefaultAsync(r => r.Token == token);
+
+            if (stored != null)
+            {
+                stored.Revoked = true;
+                await _context.SaveChangesAsync();
+            }
+        }
+
+        Response.Cookies.Delete("refresh_token");
+
+        return Ok();
+    }
+}

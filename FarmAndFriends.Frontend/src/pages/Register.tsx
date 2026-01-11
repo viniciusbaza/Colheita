@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 export default function Register() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [farmname, setFarmName] = useState('')
   const [confirmPassword, setConfirmPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -16,7 +17,7 @@ export default function Register() {
     setError(null)
 
     // ✅ Validação de campos
-    if (!username || !password || !confirmPassword) {
+    if (!username || !password || !confirmPassword || !farmname) {
       setError('Todos os campos são obrigatórios.')
       return
     }
@@ -26,10 +27,15 @@ export default function Register() {
       return
     }
 
+    if (!farmname.trim()) {
+      setError('Informe o nome da fazenda')
+      return
+    }
+
     setLoading(true)
 
     try {
-      const response = await registerRequest({ username, password })
+      const response = await registerRequest({ username, password, farmname })
       alert(`Registro realizado com sucesso! 🎉  Bem-vindo ${response.username} `)  
       navigate('/login') // Redireciona para a página do Login
     } catch (err: any) {
@@ -75,7 +81,14 @@ export default function Register() {
             placeholder="Confirmar Senha"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            className="w-full mb-6 p-3 rounded bg-gray-700 placeholder-gray-400"
+            className="w-full mb-4 p-3 rounded bg-gray-700 placeholder-gray-400"
+          />
+          <input
+            type="text"
+            placeholder="Nome da fazenda"
+            value={farmname}
+            onChange={e => setFarmName(e.target.value)}
+            className="w-full mb-4 p-3 rounded bg-gray-700 placeholder-gray-400"
           />
           {error && (
             <p className="text-sm text-red-400 text-center">

@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FarmAndFriends.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260103233044_InitialCreate")]
+    [Migration("20260111090424_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -130,6 +130,35 @@ namespace FarmAndFriends.Api.Migrations
                     b.ToTable("Plots");
                 });
 
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.RefreshToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Revoked")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("RefreshTokens");
+                });
+
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Seed", b =>
                 {
                     b.Property<string>("Id")
@@ -231,6 +260,9 @@ namespace FarmAndFriends.Api.Migrations
                     b.Property<Guid>("FarmId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("GotBonus")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid>("PlotId")
                         .HasColumnType("uuid");
 
@@ -301,6 +333,17 @@ namespace FarmAndFriends.Api.Migrations
                     b.Navigation("Farm");
                 });
 
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.RefreshToken", b =>
+                {
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.User", "User")
+                        .WithMany("RefreshTokens")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("TheftLog", b =>
                 {
                     b.HasOne("FarmAndFriends.Api.Domain.Entities.Farm", "Farm")
@@ -349,6 +392,8 @@ namespace FarmAndFriends.Api.Migrations
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.User", b =>
                 {
                     b.Navigation("Farms");
+
+                    b.Navigation("RefreshTokens");
                 });
 #pragma warning restore 612, 618
         }

@@ -180,7 +180,9 @@ public class PlotController : ControllerBase
         plot.PlantedAt = null;
         plot.ReadyAt = null;
 
-        await _experienceService.AddXpAsync(userId, 25);
+        var xpGained = 25;
+
+        await _experienceService.AddXpAsync(userId, xpGained);
 
         await _context.SaveChangesAsync();
 
@@ -189,7 +191,8 @@ public class PlotController : ControllerBase
             plot.Id,
             crop = seed.CropId,
             amount = finalYield,
-            inventoryTotal = cropItem.Quantity
+            inventoryTotal = cropItem.Quantity,
+            xpGained
         });
     }
 }

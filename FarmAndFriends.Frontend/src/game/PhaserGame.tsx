@@ -1,7 +1,12 @@
 import { usePhaserGame } from "./usePhaserGame"
+import type { Farm } from '../types/Farm'
 
-export function PhaserGame() {
-  usePhaserGame('game-container')
+type Props = {
+  farm: Farm
+}
+
+export function PhaserGame({ farm }: Props) {
+  usePhaserGame('game-container', { farm })
 
   return (
     <div

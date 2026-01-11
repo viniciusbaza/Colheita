@@ -1,1 +1,82 @@
 @import "tailwindcss";
+
+/* 🐭 Estilo do balão de informações */
+.plot-modal {
+  background: white;
+  color: black;
+  padding: 12px;
+  border-radius: 12px;
+  min-width: 180px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+  position: relative;
+  z-index: 100;
+}
+
+/* 🐭 Rabinho do balão */
+.plot-modal::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+
+  border-width: 10px 10px 0 10px;
+  border-style: solid;
+  border-color: white transparent transparent transparent;
+}
+
+/* 🌾 Ações do Plot */
+.plot-actions {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 🔗 Link de ação estilo jogo */
+.plot-action {
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  background: #f0fdf4; /* verde claro */
+  color: #166534;      /* verde escuro */
+  border: 1px solid #bbf7d0;
+}
+
+/* hover */
+.plot-action:hover {
+  background: #bbf7d0;
+  transform: translateY(-1px);
+}
+
+/* click */
+.plot-action:active {
+  transform: translateY(0);
+  background: #86efac;
+}
+
+/* ação destrutiva / colheita */
+.plot-action.harvest {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+}
+
+.plot-action.harvest:hover {
+  background: #fde68a;
+}
+
+/* desabilitado */
+.plot-action.disabled {
+  opacity: 0.6;
+  cursor: default;
+  pointer-events: none;
+  background: #f3f4f6;
+  color: #6b7280;
+}

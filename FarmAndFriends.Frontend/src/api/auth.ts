@@ -12,6 +12,7 @@ export interface LoginResponse {
 export interface RegisterRequest {
   username: string
   password: string
+  farmname: string
 }
 
 export interface RegisterResponse {
