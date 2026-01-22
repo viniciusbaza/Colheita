@@ -4,7 +4,7 @@ export function formatTimeRemaining(readyAt: string) {
 
   const diffMs = readyTime - now
 
-  if (diffMs <= 0) return 'Pronto!'
+  if (diffMs <= 0) return '✅'
 
   const totalSeconds = Math.floor(diffMs / 1000)
   const minutes = Math.floor(totalSeconds / 60)
@@ -15,4 +15,9 @@ export function formatTimeRemaining(readyAt: string) {
   }
 
   return `${seconds}s`
+}
+
+export function parseTimeSpanToSeconds(time: string) {
+  const [h, m, s] = time.split(':').map(Number)
+  return h * 3600 + m * 60 + s
 }

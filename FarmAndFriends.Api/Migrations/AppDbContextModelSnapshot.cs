@@ -210,10 +210,22 @@ namespace FarmAndFriends.Api.Migrations
                             BuyPrice = 20,
                             CropAmount = 3,
                             CropId = "corn_crop",
-                            GrowTime = 900.0,
+                            GrowTime = 120.0,
                             MinLevel = 2,
                             Name = "Milho",
                             SellPrice = 45,
+                            TheftChancePercent = 100
+                        },
+                        new
+                        {
+                            Id = "tomato",
+                            BuyPrice = 30,
+                            CropAmount = 4,
+                            CropId = "tomato_crop",
+                            GrowTime = 120.0,
+                            MinLevel = 3,
+                            Name = "Tomate",
+                            SellPrice = 60,
                             TheftChancePercent = 100
                         });
                 });

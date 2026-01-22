@@ -5,6 +5,7 @@ using FarmAndFriends.Api.Infrastructure.Auth;
 using FarmAndFriends.Api.Domain.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
+using FarmAndFriends.Api.Domain.Enums;
 
 namespace FarmAndFriends.Api.Controllers;
 
@@ -142,7 +143,7 @@ public class AuthController : ControllerBase
             }
         }
 
-        // 🧰 Inventário inicia
+        // 🧰 Inventário inicial
         var inventory = new Inventory
         {
             Id = Guid.NewGuid(),
@@ -151,9 +152,38 @@ public class AuthController : ControllerBase
             PremiumCoins = 10
         };
 
+        var starterItems = new List<InventoryItem>
+        {
+            new InventoryItem
+            {
+                Id = Guid.NewGuid(),
+                InventoryId = inventory.Id,
+                ItemType = ItemType.Seed,
+                ItemId = "corn",
+                Quantity = 10
+            },
+            new InventoryItem
+            {
+                Id = Guid.NewGuid(),
+                InventoryId = inventory.Id,
+                ItemType = ItemType.Seed,
+                ItemId = "carrot",
+                Quantity = 5
+            },
+            new InventoryItem
+            {
+                Id = Guid.NewGuid(),
+                InventoryId = inventory.Id,
+                ItemType = ItemType.Seed,
+                ItemId = "tomato",
+                Quantity = 10
+            }
+        };
+
         _context.Users.Add(user);
         _context.Farms.Add(farm);
         _context.Inventories.Add(inventory);
+        _context.InventoryItems.AddRange(starterItems);
 
         await _context.SaveChangesAsync();
 

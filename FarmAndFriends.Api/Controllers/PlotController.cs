@@ -89,6 +89,7 @@ public class PlotController : ControllerBase
         plot.SeedId = seed.Id;
         plot.PlantedAt = now;
         plot.ReadyAt = now.Add(seed.GrowTime);
+        plot.RemainingYield = seed.CropAmount;
 
         await _experienceService.AddXpAsync(userId, 5);
 
@@ -180,7 +181,7 @@ public class PlotController : ControllerBase
         plot.PlantedAt = null;
         plot.ReadyAt = null;
 
-        var xpGained = 25;
+        var xpGained = 25 * seed.MinLevel;
 
         await _experienceService.AddXpAsync(userId, xpGained);
 

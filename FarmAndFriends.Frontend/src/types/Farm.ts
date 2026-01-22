@@ -1,3 +1,29 @@
+type XpSource = 'HARVEST' | 'STEAL'
+
+export type PlotStealDone = {
+  plotId: string
+  stolen: number
+  remainingYield: number
+  xpGained: number
+}
+
+export type PlotStealFailed = {
+  plotId: string
+  reason: string
+}
+
+export type PlotHarvestDone = {
+  plotId: string
+  xpGained: number
+}
+
+export type StealResponse = {
+  plotId: string
+  stolen: number
+  ownerWillReceive: number
+  xpGained: number
+}
+
 export type HarvestResponse = {
   id: string
   crop: string
@@ -30,5 +56,19 @@ export type Plot = {
 export type Farm = {
   id: string
   name: string
+  ownerUserId: string
+  ownerUsername: string
   plots: Plot[]
+}
+
+export type Seed = {
+  id: string
+  name: string
+  buyPrice: number
+  sellPrice: number
+  growTime: string // "HH:mm:ss"
+  theftChancePercent: number
+  minLevel: number
+  cropId: string
+  cropAmount: number
 }

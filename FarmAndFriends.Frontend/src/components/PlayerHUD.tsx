@@ -1,15 +1,48 @@
 import { useUser } from '../user/useUser'
 import { useAuth } from '../auth/useAuth'
 import { useNavigate } from 'react-router-dom'
-import { useFarm } from '../farm/useFarm'
+import { useFarm } from '../farm/FarmContext'
 import { useEffect, useState } from 'react'
 import { xpToNextLevel } from '../rules/levelProgression'
+import { FriendsPanel } from './FriendsPanel'
 
 export function PlayerHUD() {
   const { user } = useUser()
-  const { farm } = useFarm()
+  const { farm, isVisiting, visitFarm, returnToOwnFarm, session } = useFarm()
   const { logout } = useAuth()
   const navigate = useNavigate()
+  const [showFriends, setShowFriends] = useState(false) 
+
+  const mockFriends = [
+    {
+      userId: '2f6fe179-232d-4c60-b54e-6b52fca32a60',
+      username: 'tst',
+      farmId: 'f2405b6f-4604-4a60-8f3b-4565bcd2d894',
+      farmName: 'Fazenda do Rato',
+      avatarUrl: ''
+    },
+    {
+      userId: 'b1ca7432-971f-4abc-a3db-9200e8c93323',
+      username: 'usr',
+      farmId: '9079ef3d-98e0-41db-9972-f8dfa3611e1a',
+      farmName: 'Fazenda Feliz',
+      avatarUrl: ''
+    },
+    {
+      userId: '3',
+      username: 'Beltrano',
+      farmId: '',
+      farmName: 'Sunny Farm',
+      avatarUrl: ''
+    },
+    {
+      userId: '4',
+      username: 'Mimi',
+      farmId: '',
+      farmName: 'Cantinho Verde',
+      avatarUrl: ''
+    }
+  ]
 
   function handleLogout() {
     logout()
@@ -80,9 +113,53 @@ export function PlayerHUD() {
         </small>
       </div>
 
+      {isVisiting && (
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-40
+                        bg-amber-100 border border-amber-300
+                        rounded-full px-3 py-1 shadow
+                        flex items-center gap-3">
+          <span className="text-sm text-amber-900">
+            👀 Visitando {farm?.name} de <strong>{session.ownerUsername}</strong>
+          </span>
+
+          <button
+            onClick={returnToOwnFarm}
+            className="text-sm bg-amber-500 text-white
+                      px-3 py-1 rounded-full
+                      hover:bg-amber-600 transition"
+          >
+            ⬅ Voltar
+          </button>
+        </div>
+      )}
+
+      <div className="fixed top-7 right-20 z-40">
+        {/* DEV ONLY — será movido para o menu radial */}
+        <button
+          onClick={() => setShowFriends(true)}
+          className="rounded-full bg-emerald-600 px-4 py-1 text-white shadow hover:bg-emerald-700"
+        >
+          👥
+        </button>
+      </div>
+
+      {showFriends && (
+        <FriendsPanel
+          friends={mockFriends}
+          onClose={() => setShowFriends(false)}
+          onVisitFriend={(friend) => {
+            visitFarm(
+              friend.farmId,
+              friend.userId,
+              friend.username
+            )
+          }}
+        />
+      )}
+
       <button
         onClick={handleLogout}
-        className="text-sm bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
+        className="text-sm bg-red-500 text-white px-3 py-1 rounded-full hover:bg-red-600"
       >
          Sair
       </button>

@@ -3,6 +3,7 @@ import Login from './pages/Login'
 import Game from './pages/Game'
 import Register from './pages/Register'
 import { useAuth } from './auth/useAuth'
+import { FarmProvider } from './farm/FarmContext'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -15,7 +16,13 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/game" element={<PrivateRoute><Game /></PrivateRoute>} />
+        <Route path="/game" element={
+          <PrivateRoute>
+            <FarmProvider>
+              <Game />
+            </FarmProvider>
+          </PrivateRoute>
+        } />
         <Route path="*" element={<Navigate to="/game" />} />
       </Routes>
     </BrowserRouter>

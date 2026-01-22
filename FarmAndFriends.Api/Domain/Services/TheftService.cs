@@ -4,8 +4,8 @@ namespace FarmAndFriends.Api.Domain.Services;
 
 public class TheftService
 {
-    private const int BaseDailyLimit = 5;
-    private const int XpPerItem = 5;
+    private const int BaseDailyLimit = 10;
+    private const int XpPerItem = 45;
     private const double MaxBonusChance = 0.20;
     private const double MinBonusChance = 0.05;
     private readonly Random _random = new();

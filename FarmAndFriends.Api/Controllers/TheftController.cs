@@ -54,8 +54,18 @@ public class TheftController : ControllerBase
         if (thief == null)
             return Unauthorized();
 
+        var stolenFromThisPlant = await _context.TheftLogs
+            .Where(t =>
+                t.PlotId == plot.Id &&
+                t.CreatedAt >= plot.PlantedAt
+            )
+            .SumAsync(t => t.Quantity);
+
         // 3️⃣ Quantidade restante de yield
-        var remainingYield = plot.RemainingYield ?? seed.CropAmount;
+        var remainingYield = Math.Max(
+            1,
+            seed.CropAmount - stolenFromThisPlant
+        );
 
         // 4️⃣ Quanto já roubou hoje nessa farm
         var today = DateTime.UtcNow.Date;
@@ -133,6 +143,7 @@ public class TheftController : ControllerBase
 
         return Ok(new
         {
+            plot.Id,
             stolen = result.StolenAmount,
             ownerWillReceive = result.OwnerAmount,
             xpGained = result.XpGained

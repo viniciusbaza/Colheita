@@ -9,6 +9,9 @@ public static class FarmMapper
     {
         return new FarmResponse(
             farm.Id,
+            farm.Name,
+            farm.UserId,
+            farm.User.Username,
             farm.Plots
                 .OrderBy(p => p.Y)
                 .ThenBy(p => p.X)

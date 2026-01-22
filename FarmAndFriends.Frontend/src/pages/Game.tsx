@@ -1,15 +1,24 @@
 import { useUser } from '../user/useUser'
-import { useFarm } from '../farm/useFarm'
+import { useFarmInternal as useFarm } from '../farm/useFarm'
 import { usePlotInteraction } from '../farm/usePlotInteraction'
 import { PlayerHUD } from '../components/PlayerHUD' 
 import { PhaserGame } from '../game/PhaserGame'
 import { PlotModal } from '../components/PlotModal'
 import { clamp } from '../utils/math'
+import { useEffect } from 'react'
 
 export default function Game() {
   const { user, loading } = useUser()
   const { farm } = useFarm()
   const { selectedPlot, closePlot } = usePlotInteraction()
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('ui:modal', {
+        detail: { open: !!selectedPlot }
+      })
+    )
+  }, [selectedPlot])
   
   // Estado de loading
   if (loading) {
@@ -50,19 +59,35 @@ export default function Game() {
 
       {/* Modal do Plot */}
       {selectedPlot && (() => {
-        const modalX = clamp(selectedPlot.x, 120, window.innerWidth - 120)
-        const modalY = clamp(selectedPlot.y, 140, window.innerHeight - 40)
+        const MARGIN = 16
+        
+        const modalX = clamp(
+          selectedPlot.x,
+          MARGIN,
+          window.innerWidth - MARGIN
+        )
+
+        const modalY = clamp(
+          selectedPlot.y,
+          MARGIN + 40,
+          window.innerHeight - MARGIN
+        )
 
         return (
-          <div
-            className='absolute z-50'
-            style={{
-              left: modalX,
-              top: modalY,
-              transform: 'translate(-50%, -100%)',
-            }}
-          >
-            <PlotModal plotId={selectedPlot.plotId} onClose={closePlot} />
+          <div className='fixed inset-0 z-40' onClick={closePlot}>
+            <div className='fixed z-50'
+              style={{
+                left: modalX,
+                top: modalY,
+                transform: 'translate(-50%, -100%)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <PlotModal 
+                plotId={selectedPlot.plotId} 
+                onClose={closePlot} 
+              />
+            </div>
           </div>
         )
       })()}

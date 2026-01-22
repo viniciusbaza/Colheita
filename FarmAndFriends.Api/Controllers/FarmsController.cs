@@ -32,6 +32,7 @@ public class FarmsController : ControllerBase
             return Unauthorized();
 
         var farm = await _context.Farms
+            .Include(f => f.User)
             .Include(f => f.Plots)
             .FirstOrDefaultAsync(f => f.UserId == Guid.Parse(userId));
 
@@ -46,8 +47,10 @@ public class FarmsController : ControllerBase
 
         return Ok(new
         {
-            baseResponse.Id,
-            farm.Name,
+            id = baseResponse.Id,
+            name = farm.Name,
+            ownerUserId = farm.UserId,
+            ownerUsername = farm.User.Username,
             plots = baseResponse.Plots.Select(p => new
             {
                 p.Id,
@@ -56,6 +59,53 @@ public class FarmsController : ControllerBase
                 p.Unlocked,
                 p.SeedId,
                 plantedAt = farm.Plots.First(pl => pl.Id == p.Id).PlantedAt,
+                p.IsReady,
+                p.ReadyAt,
+                p.RemainingYield
+            })
+        });
+    }
+
+    [HttpGet("{farmId}")]
+    public async Task<IActionResult> GetPublicFarm(Guid farmId)
+    {
+        var userId = Guid.Parse(
+            User.FindFirstValue(ClaimTypes.NameIdentifier)!
+        );
+
+        var farm = await _context.Farms
+            .Include(f => f.Plots)
+            .Include(f => f.User)
+            .FirstOrDefaultAsync(f => f.Id == farmId);
+
+        if (farm == null)
+            return NotFound("Farm não encontrada");
+
+        // ❌ Impede acessar a própria fazenda por aqui
+        if (farm.UserId == userId)
+            return BadRequest("Use /farms/my para acessar sua própria fazenda");
+
+        var now = DateTime.UtcNow;
+
+        // ⚠️ SIM, populamos remainingYield
+        // O roubo depende disso
+        await _farmYieldService.PopulateRemainingYieldAsync(farm, now);
+
+        var baseResponse = FarmMapper.ToFarmResponse(farm, now);
+
+        return Ok(new
+        {
+            baseResponse.Id,
+            farm.Name,
+            ownerUserId = farm.UserId,
+            ownerUsername = farm.User.Username,
+            plots = baseResponse.Plots.Select(p => new
+            {
+                p.Id,
+                p.X,
+                p.Y,
+                p.Unlocked,
+                p.SeedId,
                 p.IsReady,
                 p.ReadyAt,
                 p.RemainingYield

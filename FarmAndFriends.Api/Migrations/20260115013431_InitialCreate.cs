@@ -202,7 +202,8 @@ namespace FarmAndFriends.Api.Migrations
                 values: new object[,]
                 {
                     { "carrot", 10, 1, "carrot_crop", 300.0, 1, "Cenoura", 20, 100 },
-                    { "corn", 20, 3, "corn_crop", 900.0, 2, "Milho", 45, 100 }
+                    { "corn", 20, 3, "corn_crop", 120.0, 2, "Milho", 45, 100 },
+                    { "tomato", 30, 4, "tomato_crop", 120.0, 3, "Tomate", 60, 100 }
                 });
 
             migrationBuilder.CreateIndex(

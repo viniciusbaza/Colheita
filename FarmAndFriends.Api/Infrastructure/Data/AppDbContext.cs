@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using FarmAndFriends.Api.Domain.Entities;
+using FarmAndFriends.Api.Domain.Enums;
 
 namespace FarmAndFriends.Api.Infrastructure.Data;
 
@@ -60,11 +61,23 @@ public class AppDbContext : DbContext
                 Name = "Milho",
                 BuyPrice = 20,
                 SellPrice = 45,
-                GrowTime = TimeSpan.FromMinutes(15),
+                GrowTime = TimeSpan.FromMinutes(2),
                 TheftChancePercent = 100,
                 MinLevel = 2,
                 CropId = "corn_crop",
                 CropAmount = 3  
+            },
+            new Seed
+            {
+                Id = "tomato",
+                Name = "Tomate",
+                BuyPrice = 30,
+                SellPrice = 60,
+                GrowTime = TimeSpan.FromMinutes(2),
+                TheftChancePercent = 100,
+                MinLevel = 3,
+                CropId = "tomato_crop",
+                CropAmount = 4
             }
         );
 

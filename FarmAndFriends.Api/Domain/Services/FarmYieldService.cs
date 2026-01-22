@@ -30,7 +30,9 @@ public class FarmYieldService
             }
             // Soma roubos do plot
             var stolenAmount = await _context.TheftLogs
-                .Where(t => t.PlotId == plot.Id)
+                .Where(t => t.PlotId == plot.Id &&
+                       t.CreatedAt >= plot.PlantedAt
+                )
                 .SumAsync(t => t.Quantity);
             // Calcula yield restante
             plot.RemainingYield = Math.Max(1, seed.CropAmount - stolenAmount);

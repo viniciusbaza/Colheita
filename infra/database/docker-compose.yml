@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: farmfriends_postgres
+    restart: unless-stopped
+
+    ports:
+      - "5432:5432"
+
+    environment:
+      POSTGRES_DB: farmandfriends
+      POSTGRES_USER: farm_user
+      POSTGRES_PASSWORD: master@2025
+
+    volumes:
+      - farmfriends_pgdata:/var/lib/postgresql/data
+
+volumes:
+  farmfriends_pgdata:

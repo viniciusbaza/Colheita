@@ -8,8 +8,17 @@
   border-radius: 12px;
   min-width: 180px;
   box-shadow: 0 10px 25px rgba(0,0,0,0.25);
-  position: relative;
-  z-index: 100;
+  position: absolute;
+  transform: translate(-50%, -100%);
+  z-index: 1001;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 1000;
+  pointer-events: auto;
 }
 
 /* 🐭 Rabinho do balão */

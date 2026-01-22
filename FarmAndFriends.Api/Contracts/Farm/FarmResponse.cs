@@ -2,6 +2,9 @@ namespace FarmAndFriends.Api.Contracts.Farms;
 
 public record FarmResponse(
     Guid Id,
+    string Name,
+    Guid OwnerUserId,
+    string OwnerUsername,
     List<PlotResponse> Plots
 );
 
