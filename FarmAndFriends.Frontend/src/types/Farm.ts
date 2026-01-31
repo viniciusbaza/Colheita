@@ -1,5 +1,3 @@
-type XpSource = 'HARVEST' | 'STEAL'
-
 export type PlotStealDone = {
   plotId: string
   stolen: number

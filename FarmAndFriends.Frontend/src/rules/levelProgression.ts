@@ -1,3 +1,5 @@
+// Regras de progressão de nível do jogador
+// Mesma lógica do backend
 export function xpToNextLevel(level: number): number {
   switch (level) {
     case 1:

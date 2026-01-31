@@ -13,7 +13,11 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
   onVisitFriend
 }) => {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="w-full max-w-md rounded-2xl bg-emerald-50 shadow-xl">
 
         {/* Header */}
@@ -46,7 +50,8 @@ export const FriendsPanel: React.FC<FriendsPanelProps> = ({
             friends.map(friend => (
               <button
                 key={friend.userId}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation()
                   onVisitFriend(friend)
                   onClose()
                 }}

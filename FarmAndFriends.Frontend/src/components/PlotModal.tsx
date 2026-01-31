@@ -59,6 +59,13 @@ export function PlotModal({ plotId, onClose }: Props) {
         }
       )
 
+      // Avisa o HUD para atualizar a xp
+      window.dispatchEvent(
+        new CustomEvent('user:xp:gained', {
+          detail: { xpGained: 5 }
+        })
+      )
+
       onClose()
 
       // 🔄 sincroniza tudo
@@ -80,13 +87,19 @@ export function PlotModal({ plotId, onClose }: Props) {
         { method: 'POST' }
       )
 
-      // avisa o Phaser COM DADOS PRONTOS
+      // Avisa o Phaser COM DADOS PRONTOS
       window.dispatchEvent(
         new CustomEvent('plot:harvest:done', {
           detail: {
             plotId: plotId,
             xpGained: data.xpGained
           }
+        })
+      )
+      // Avisa o HUD para atualizar a xp
+      window.dispatchEvent(
+        new CustomEvent('user:xp:gained', {
+          detail: { xpGained: data.xpGained }
         })
       )
 
@@ -121,13 +134,15 @@ export function PlotModal({ plotId, onClose }: Props) {
         })
       )
 
-      // deixa o Phaser reagir primeiro
-      setTimeout(() => {
-        refreshFarm()
-      }, 300)
+      // Avisa o HUD para atualizar a XP
+      window.dispatchEvent(
+        new CustomEvent('user:xp:gained', {
+          detail: { xpGained: data.xpGained }
+        })
+      )
 
       onClose()
-      //await refreshFarm()
+      await refreshFarm()
     } catch (err) {
       const message =
         err instanceof Error

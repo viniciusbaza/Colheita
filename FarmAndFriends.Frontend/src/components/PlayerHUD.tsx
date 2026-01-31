@@ -29,9 +29,9 @@ export function PlayerHUD() {
       avatarUrl: ''
     },
     {
-      userId: '3',
-      username: 'Beltrano',
-      farmId: '',
+      userId: '384d087ea-5800-4edd-810a-1e843f6b2843',
+      username: 'vin',
+      farmId: 'af9c3884-9700-47da-b35a-f28b7ab2cae3',
       farmName: 'Sunny Farm',
       avatarUrl: ''
     },
@@ -58,7 +58,7 @@ export function PlayerHUD() {
   }, [user])
 
   useEffect(() => {
-    function onHarvest(e: Event) {
+    function onXpGained(e: Event) {
       const { xpGained } = (e as CustomEvent<{ xpGained: number }>).detail
 
       setDisplayUser(prev => {
@@ -72,7 +72,7 @@ export function PlayerHUD() {
         while (newXp >= xpToNext) {
           newXp -= xpToNext
           newLevel += 1
-          xpToNext = xpToNextLevel(newLevel) // mesma regra do backend
+          xpToNext = xpToNextLevel(newLevel)
         }
 
         return {
@@ -84,9 +84,9 @@ export function PlayerHUD() {
       })
     }
 
-    window.addEventListener('plot:harvest:done', onHarvest)
+    window.addEventListener('user:xp:gained', onXpGained)
     return () =>
-      window.removeEventListener('plot:harvest:done', onHarvest)
+      window.removeEventListener('user:xp:gained', onXpGained )
   }, [])
 
   const xpPercent = (displayUser.currentXp / displayUser.xpToNextLevel) * 100
@@ -94,7 +94,7 @@ export function PlayerHUD() {
   return (
     <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between bg-green-900 p-4 pointer-events-auto">
       <div className='hidden sm:block'>
-        <p className="fixed top-0.5 left-0.5 text-[10px] font-mono text-white/40 tracking-wider select-none pointer-events-none">ID: {user.id}</p>
+        {/* <p className="fixed top-0.5 left-0.5 text-[10px] font-mono text-white/40 tracking-wider select-none pointer-events-none">ID: {user.id}</p> */}
         <p className="text-sm">🌾 Fazenda: {farm?.name}</p>
         <p className="font-bold">👤 {displayUser.username}</p>
       </div>
@@ -136,7 +136,15 @@ export function PlayerHUD() {
       <div className="fixed top-7 right-20 z-40">
         {/* DEV ONLY — será movido para o menu radial */}
         <button
-          onClick={() => setShowFriends(true)}
+          onClick={() => {
+            setShowFriends(true)
+            //Desliga o input no phaser
+            window.dispatchEvent(
+              new CustomEvent('ui:modal', {
+                detail: { open: true }
+              })
+            )
+          }}
           className="rounded-full bg-emerald-600 px-4 py-1 text-white shadow hover:bg-emerald-700"
         >
           👥
@@ -146,7 +154,15 @@ export function PlayerHUD() {
       {showFriends && (
         <FriendsPanel
           friends={mockFriends}
-          onClose={() => setShowFriends(false)}
+          onClose={() => {
+            setShowFriends(false)
+            //liga novamente o input no phaser
+            window.dispatchEvent(
+              new CustomEvent('ui:modal', {
+                detail: { open: false }
+              })
+            )
+          }}
           onVisitFriend={(friend) => {
             visitFarm(
               friend.farmId,
