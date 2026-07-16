@@ -19,6 +19,7 @@ namespace FarmAndFriends.Api.Migrations
                 {
                     Id = table.Column<string>(type: "text", nullable: false),
                     Name = table.Column<string>(type: "text", nullable: false),
+                    Icon = table.Column<string>(type: "text", nullable: false),
                     BuyPrice = table.Column<int>(type: "integer", nullable: false),
                     SellPrice = table.Column<int>(type: "integer", nullable: false),
                     GrowTime = table.Column<double>(type: "double precision", nullable: false),
@@ -198,12 +199,12 @@ namespace FarmAndFriends.Api.Migrations
 
             migrationBuilder.InsertData(
                 table: "Seeds",
-                columns: new[] { "Id", "BuyPrice", "CropAmount", "CropId", "GrowTime", "MinLevel", "Name", "SellPrice", "TheftChancePercent" },
+                columns: new[] { "Id", "BuyPrice", "CropAmount", "CropId", "GrowTime", "Icon", "MinLevel", "Name", "SellPrice", "TheftChancePercent" },
                 values: new object[,]
                 {
-                    { "carrot", 10, 1, "carrot_crop", 300.0, 1, "Cenoura", 20, 100 },
-                    { "corn", 20, 3, "corn_crop", 120.0, 2, "Milho", 45, 100 },
-                    { "tomato", 30, 4, "tomato_crop", 120.0, 3, "Tomate", 60, 100 }
+                    { "carrot", 10, 1, "carrot_crop", 300.0, "🥕", 1, "Cenoura", 20, 100 },
+                    { "corn", 20, 3, "corn_crop", 120.0, "🌽", 2, "Milho", 45, 100 },
+                    { "tomato", 30, 4, "tomato_crop", 120.0, "🍅", 3, "Tomate", 60, 100 }
                 });
 
             migrationBuilder.CreateIndex(

@@ -17,6 +17,16 @@ export function useInventory() {
 
   useEffect(() => {
     fetchInventory()
+
+    function onInventoryChanged() {
+      fetchInventory()
+    }
+
+    window.addEventListener('inventory:changed', onInventoryChanged)
+
+    return () => {
+      window.removeEventListener('inventory:changed', onInventoryChanged)
+    }
   }, [])
 
   return {

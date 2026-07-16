@@ -62,6 +62,7 @@ export type Farm = {
 export type Seed = {
   id: string
   name: string
+  icon: string
   buyPrice: number
   sellPrice: number
   growTime: string // "HH:mm:ss"

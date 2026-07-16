@@ -183,7 +183,7 @@ export function PlotModal({ plotId, onClose }: Props) {
                 border text-sm"
                 onClick={() => handlePlant(seed.itemId)}
               >
-                🫘 {getSeed(seed.itemId)?.name} x{seed.quantity}
+                🌱 {getSeed(seed.itemId)?.name} x{seed.quantity}
               </button>
             ))}
           </div>  

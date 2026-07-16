@@ -15,8 +15,23 @@ export function useSeeds() {
     return seeds.find(s => s.id === id)
   }
 
+  function getSeedByItem(itemType?: 'Seed' | 'Crop', itemId?: string) {
+    if (!itemType || !itemId) return undefined
+
+    if (itemType === 'Seed') {
+      return seeds.find(s => s.id === itemId)
+    }
+
+    if (itemType === 'Crop') {
+      return seeds.find(s => s.cropId === itemId)
+    }
+
+    return undefined
+  }
+
   return {
     seeds,
-    getSeed
+    getSeed,
+    getSeedByItem 
   }
 }

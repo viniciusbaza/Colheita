@@ -174,6 +174,10 @@ namespace FarmAndFriends.Api.Migrations
                     b.Property<double>("GrowTime")
                         .HasColumnType("double precision");
 
+                    b.Property<string>("Icon")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<int>("MinLevel")
                         .HasColumnType("integer");
 
@@ -199,6 +203,7 @@ namespace FarmAndFriends.Api.Migrations
                             CropAmount = 1,
                             CropId = "carrot_crop",
                             GrowTime = 300.0,
+                            Icon = "🥕",
                             MinLevel = 1,
                             Name = "Cenoura",
                             SellPrice = 20,
@@ -211,6 +216,7 @@ namespace FarmAndFriends.Api.Migrations
                             CropAmount = 3,
                             CropId = "corn_crop",
                             GrowTime = 120.0,
+                            Icon = "🌽",
                             MinLevel = 2,
                             Name = "Milho",
                             SellPrice = 45,
@@ -223,6 +229,7 @@ namespace FarmAndFriends.Api.Migrations
                             CropAmount = 4,
                             CropId = "tomato_crop",
                             GrowTime = 120.0,
+                            Icon = "🍅",
                             MinLevel = 3,
                             Name = "Tomate",
                             SellPrice = 60,

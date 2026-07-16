@@ -1,3 +1,4 @@
+import { useInventory } from '../inventory/useInventory'
 import { useUser } from '../user/useUser'
 import { useAuth } from '../auth/useAuth'
 import { useNavigate } from 'react-router-dom'
@@ -5,6 +6,8 @@ import { useFarm } from '../farm/FarmContext'
 import { useEffect, useState } from 'react'
 import { xpToNextLevel } from '../rules/levelProgression'
 import { FriendsPanel } from './FriendsPanel'
+import { InventoryPanel } from './InventoryPanel'
+import { ShopPanel } from '../shop/ShopPanel'
 
 export function PlayerHUD() {
   const { user } = useUser()
@@ -12,6 +15,12 @@ export function PlayerHUD() {
   const { logout } = useAuth()
   const navigate = useNavigate()
   const [showFriends, setShowFriends] = useState(false) 
+  const [showShop, setShowShop] = useState(false)
+  const { inventory } = useInventory()
+  const [showInventory, setShowInventory] = useState(false)
+  const coins = inventory?.coins ?? 0
+  const premiumCoins = inventory?.premiumCoins ?? 0
+
 
   const mockFriends = [
     {
@@ -97,6 +106,10 @@ export function PlayerHUD() {
         {/* <p className="fixed top-0.5 left-0.5 text-[10px] font-mono text-white/40 tracking-wider select-none pointer-events-none">ID: {user.id}</p> */}
         <p className="text-sm">🌾 Fazenda: {farm?.name}</p>
         <p className="font-bold">👤 {displayUser.username}</p>
+        <div className="flex items-center gap-4">
+          <span className="text-sm">🪙 {coins}</span>
+          <span className="text-sm text-pink-300">💎 {premiumCoins}</span>
+        </div>
       </div>
       <div>
         <p className="text-sm">⭐ Level {displayUser.level}</p>
@@ -149,6 +162,31 @@ export function PlayerHUD() {
         >
           👥
         </button>
+
+        <button
+          onClick={() => {
+            setShowInventory(true)
+            //Desliga o input no phaser
+            window.dispatchEvent(
+              new CustomEvent('ui:modal', { detail: { open: true } })
+            )
+          }}
+          className="rounded-full bg-emerald-600 px-4 py-1 text-white shadow hover:bg-amber-700"
+        >
+          🎒
+        </button>
+
+        <button
+          onClick={() => {
+            setShowShop(true)
+            window.dispatchEvent(
+              new CustomEvent('ui:modal', { detail: { open: true } })
+            )
+          }}
+          className="rounded-full bg-emerald-600 px-4 py-1 text-white shadow hover:bg-emerald-700"
+        >
+          🏪
+        </button>
       </div>
 
       {showFriends && (
@@ -168,6 +206,28 @@ export function PlayerHUD() {
               friend.farmId,
               friend.userId,
               friend.username
+            )
+          }}
+        />
+      )}
+
+      {showInventory && (
+        <InventoryPanel
+          onClose={() => {
+            setShowInventory(false)
+            window.dispatchEvent(
+              new CustomEvent('ui:modal', { detail: { open: false } })
+            )
+          }}
+        />
+      )}
+
+      {showShop && (
+        <ShopPanel
+          onClose={() => {
+            setShowShop(false)
+            window.dispatchEvent(
+              new CustomEvent('ui:modal', { detail: { open: false } })
             )
           }}
         />

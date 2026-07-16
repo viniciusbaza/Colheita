@@ -49,6 +49,7 @@ public class AppDbContext : DbContext
                 Name = "Cenoura",
                 BuyPrice = 10,
                 SellPrice = 20,
+                Icon = "🥕",
                 GrowTime = TimeSpan.FromMinutes(5),
                 TheftChancePercent = 100,
                 MinLevel = 1,   
@@ -59,6 +60,7 @@ public class AppDbContext : DbContext
             {
                 Id = "corn",
                 Name = "Milho",
+                Icon = "🌽",
                 BuyPrice = 20,
                 SellPrice = 45,
                 GrowTime = TimeSpan.FromMinutes(2),
@@ -71,6 +73,7 @@ public class AppDbContext : DbContext
             {
                 Id = "tomato",
                 Name = "Tomate",
+                Icon = "🍅",
                 BuyPrice = 30,
                 SellPrice = 60,
                 GrowTime = TimeSpan.FromMinutes(2),
