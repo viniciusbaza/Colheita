@@ -192,13 +192,13 @@ export function PlotModal({ plotId, onClose }: Props) {
 
       {isVisiting && plot.unlocked && !plot.seedId && (
         <p className="text-sm text-gray-500">
-          ❌ Nada para fazer aqui.
+          ❌ Nada pra fazer aqui.
         </p>
       )}
 
       {plot.seedId && seedCatalog && (
         <>
-          <p className="text-xs">🌾 {seedCatalog.name}</p>
+          <p className="text-xs">{seedCatalog.icon} {seedCatalog.name}</p>
           <div className="plot-actions">
             {plot.isReady ? (
               isVisiting ? (
