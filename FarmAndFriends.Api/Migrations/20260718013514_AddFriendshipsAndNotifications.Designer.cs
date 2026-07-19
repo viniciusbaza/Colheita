@@ -3,6 +3,7 @@ using System;
 using FarmAndFriends.Api.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FarmAndFriends.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260718013514_AddFriendshipsAndNotifications")]
+    partial class AddFriendshipsAndNotifications
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -148,16 +151,10 @@ namespace FarmAndFriends.Api.Migrations
                     b.Property<Guid?>("FriendshipId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Message")
-                        .HasColumnType("text");
-
                     b.Property<DateTime?>("ReadAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("RecipientUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("TheftLogId")
                         .HasColumnType("uuid");
 
                     b.Property<int>("Type")
@@ -168,9 +165,6 @@ namespace FarmAndFriends.Api.Migrations
                     b.HasIndex("ActorUserId");
 
                     b.HasIndex("FriendshipId");
-
-                    b.HasIndex("TheftLogId")
-                        .IsUnique();
 
                     b.HasIndex("RecipientUserId", "ReadAt", "CreatedAt");
 
@@ -477,18 +471,11 @@ namespace FarmAndFriends.Api.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("TheftLog", "TheftLog")
-                        .WithMany()
-                        .HasForeignKey("TheftLogId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
                     b.Navigation("ActorUser");
 
                     b.Navigation("Friendship");
 
                     b.Navigation("RecipientUser");
-
-                    b.Navigation("TheftLog");
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Plot", b =>

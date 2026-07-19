@@ -9,8 +9,8 @@ type Props = {
 
 export function usePhaserGame(containerId: string, { farm }: Props) {
   const gameRef = useRef<Phaser.Game | null>(null)
+  const activeFarmIdRef = useRef<string | null>(null)
 
-  // 1️⃣ Cria o Phaser Game UMA VEZ
   useEffect(() => {
     if (gameRef.current) return
 
@@ -20,33 +20,26 @@ export function usePhaserGame(containerId: string, { farm }: Props) {
       width: window.innerWidth,
       height: window.innerHeight,
       backgroundColor: '#87CEEB',
-      scene: []
+      scene: [],
     })
 
     return () => {
       gameRef.current?.destroy(true)
       gameRef.current = null
+      activeFarmIdRef.current = null
     }
   }, [containerId])
-  
-  // 2️⃣ Recria a FarmScene quando a farm muda
+
   useEffect(() => {
-    function onFarmChange(e: Event) {
-      const farm = (e as CustomEvent<Farm>).detail
-      const game = gameRef.current
-      if (!game) return
+    const game = gameRef.current
+    if (!game || !farm) return
 
-      // 💥 força reinício visual
-      if (game.scene.getScene('FarmScene')) {
-        game.scene.start('FarmScene', { farm })
-      } else {
-        game.scene.add('FarmScene', FarmScene, true, { farm })
-      }
+    if (!game.scene.getScene('FarmScene')) {
+      game.scene.add('FarmScene', FarmScene, true, { farm })
+    } else if (activeFarmIdRef.current !== farm.id) {
+      game.scene.start('FarmScene', { farm })
     }
 
-    window.addEventListener('farm:change', onFarmChange)
-    return () => {
-      window.removeEventListener('farm:change', onFarmChange)
-    }
-  }, [])
+    activeFarmIdRef.current = farm.id
+  }, [farm])
 }

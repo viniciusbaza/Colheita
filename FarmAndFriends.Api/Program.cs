@@ -84,6 +84,8 @@ builder.Services.AddScoped<ExperienceService>();
 builder.Services.AddScoped<TheftService>();
 // Farm Yield
 builder.Services.AddScoped<FarmYieldService>();
+// Friendships
+builder.Services.AddScoped<FriendshipService>();
 
 // CORS Policy
 builder.Services.AddCors(options =>

@@ -1,5 +1,5 @@
 import { useUser } from '../user/useUser'
-import { useFarmInternal as useFarm } from '../farm/useFarm'
+import { useFarm } from '../farm/FarmContext'
 import { usePlotInteraction } from '../farm/usePlotInteraction'
 import { PlayerHUD } from '../components/PlayerHUD' 
 import { PhaserGame } from '../game/PhaserGame'
@@ -9,19 +9,19 @@ import { useEffect } from 'react'
 
 export default function Game() {
   const { user, loading } = useUser()
-  const { farm } = useFarm()
+  const { farm, loading: farmLoading } = useFarm()
   const { selectedPlot, closePlot } = usePlotInteraction()
 
   useEffect(() => {
     window.dispatchEvent(
       new CustomEvent('ui:modal', {
-        detail: { open: !!selectedPlot }
+        detail: { source: 'plot', open: !!selectedPlot }
       })
     )
   }, [selectedPlot])
   
   // Estado de loading
-  if (loading) {
+  if (loading || farmLoading) {
     return (
       <div className="h-screen flex items-center justify-center bg-black text-white">
         <p>🔄 Carregando jogador...</p>

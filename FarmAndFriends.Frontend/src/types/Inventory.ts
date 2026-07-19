@@ -1,5 +1,5 @@
 export type InventoryItem = {
-  itemType: 'Seed' | 'Crop'
+  itemType: 'Seed' | 'Crop' | 'Item'
   itemId: string
   quantity: number
 }

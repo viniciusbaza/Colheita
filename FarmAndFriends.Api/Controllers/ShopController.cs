@@ -16,6 +16,8 @@ namespace FarmAndFriends.Api.Controllers;
 [Authorize]
 public class ShopController : ControllerBase
 {
+    private const int MaxQuantityPerTransaction = 10_000;
+
     private readonly AppDbContext _context;
     private readonly ExperienceService _experienceService;
 
@@ -28,8 +30,9 @@ public class ShopController : ControllerBase
     [HttpPost("buy-seed")]
     public async Task<IActionResult> BuySeed([FromBody] BuySeedRequest request)
     {
-        if (request.Quantity <= 0)
-            return BadRequest("Quantidade inválida");
+        if (request.Quantity is <= 0 or > MaxQuantityPerTransaction)
+            return BadRequest(
+                $"A quantidade deve estar entre 1 e {MaxQuantityPerTransaction}.");
 
         var userId = Guid.Parse(
             User.FindFirstValue(ClaimTypes.NameIdentifier)!
@@ -48,15 +51,19 @@ public class ShopController : ControllerBase
         if (seed == null)
             return BadRequest("Seed inválida");
 
+        if (seed.BuyPrice <= 0)
+            return Problem(
+                "O preço de compra da semente está inválido.",
+                statusCode: StatusCodes.Status500InternalServerError);
+
         // 2️ Buscar inventário
         var inventory = await _context.Inventories
-            .Include(i => i.Items)
             .FirstOrDefaultAsync(i => i.UserId == userId);
 
         if (inventory == null)
             return BadRequest("Inventário não encontrado");
 
-        var totalCost = seed.BuyPrice * request.Quantity;
+        var totalCost = (long)seed.BuyPrice * request.Quantity;
 
         // 3️ Verificar coins
         if (inventory.Coins < totalCost)
@@ -65,15 +72,21 @@ public class ShopController : ControllerBase
         if (user.Level < seed.MinLevel)
             return BadRequest("Level insuficiente para comprar esta seed");
 
-        // 4️ Debitar coins
-        inventory.Coins -= totalCost;
-
-        // 5️ Adicionar seed ao inventário
+        // 4️ Calcular a nova quantidade sem risco de overflow
         var seedItem = await _context.InventoryItems.FirstOrDefaultAsync(i =>
             i.InventoryId == inventory.Id &&
             i.ItemType == ItemType.Seed &&
             i.ItemId == seed.Id
         );
+
+        var currentQuantity = seedItem?.Quantity ?? 0;
+        var updatedQuantity = (long)currentQuantity + request.Quantity;
+
+        if (updatedQuantity > int.MaxValue)
+            return BadRequest("O limite de estoque desta semente foi atingido.");
+
+        // 5️ Debitar coins e adicionar a seed ao inventário
+        inventory.Coins -= (int)totalCost;
 
         if (seedItem == null)
         {
@@ -83,14 +96,14 @@ public class ShopController : ControllerBase
                 InventoryId = inventory.Id,
                 ItemType = ItemType.Seed,
                 ItemId = seed.Id,
-                Quantity = request.Quantity
+                Quantity = (int)updatedQuantity
             };
 
             _context.InventoryItems.Add(seedItem);
         }
         else
         {
-            seedItem.Quantity += request.Quantity;
+            seedItem.Quantity = (int)updatedQuantity;
         }
 
         await _context.SaveChangesAsync();
@@ -106,8 +119,9 @@ public class ShopController : ControllerBase
     [HttpPost("sell-crop")]
     public async Task<IActionResult> SellCrop([FromBody] SellCropRequest request)
     {
-        if (request.Quantity <= 0)
-            return BadRequest("Quantidade inválida");
+        if (request.Quantity is <= 0 or > MaxQuantityPerTransaction)
+            return BadRequest(
+                $"A quantidade deve estar entre 1 e {MaxQuantityPerTransaction}.");
 
         var userId = Guid.Parse(
             User.FindFirstValue(ClaimTypes.NameIdentifier)!
@@ -137,8 +151,17 @@ public class ShopController : ControllerBase
         if (seed == null)
             return BadRequest("Crop inválido");
 
-        // 4️ Calcular ganho
-        var totalCoins = seed.SellPrice * request.Quantity;
+        if (seed.SellPrice <= 0)
+            return Problem(
+                "O preço de venda da colheita está inválido.",
+                statusCode: StatusCodes.Status500InternalServerError);
+
+        // 4️ Calcular ganho e saldo sem risco de overflow
+        var totalCoins = (long)seed.SellPrice * request.Quantity;
+        var updatedCoins = (long)inventory.Coins + totalCoins;
+
+        if (totalCoins > int.MaxValue || updatedCoins > int.MaxValue)
+            return BadRequest("O limite de moedas do inventário foi atingido.");
 
         // 5️ Atualizar inventário
         cropItem.Quantity -= request.Quantity;
@@ -146,7 +169,7 @@ public class ShopController : ControllerBase
         if (cropItem.Quantity == 0)
             _context.InventoryItems.Remove(cropItem);
 
-        inventory.Coins += totalCoins;
+        inventory.Coins = (int)updatedCoins;
 
         await _experienceService.AddXpAsync(userId, 5);
 
@@ -156,7 +179,7 @@ public class ShopController : ControllerBase
         {
             crop = request.CropId,
             sold = request.Quantity,
-            earned = totalCoins,
+            earned = (int)totalCoins,
             coins = inventory.Coins
         });
 }

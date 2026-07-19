@@ -6,10 +6,11 @@ type Props = {
 export function ShopFeedback({ message, type = 'error' }: Props) {
   return (
     <div
-      className={`mb-2 rounded px-2 py-1 text-sm text-center ${
+      role={type === 'error' ? 'alert' : 'status'}
+      className={`rounded-lg border px-3 py-2 text-sm ${
         type === 'success'
-          ? 'bg-green-500 text-white'
-          : 'bg-red-500 text-white'
+          ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
+          : 'border-red-300 bg-red-50 text-red-700'
       }`}
     >
       {message}

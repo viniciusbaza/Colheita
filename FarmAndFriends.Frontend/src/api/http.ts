@@ -1,5 +1,15 @@
 const API_URL = 'http://localhost:5204'
 
+export class ApiError extends Error {
+  status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 let isRefreshing = false
 let refreshPromise: Promise<void> | null = null
 
@@ -77,7 +87,30 @@ async function request<T>(
 
   if (!response.ok) {
     const raw = await response.text()
-    throw new Error(raw)
+    let message = raw
+
+    if (raw) {
+      try {
+        const parsed: unknown = JSON.parse(raw)
+
+        if (typeof parsed === 'string') {
+          message = parsed
+        } else if (parsed && typeof parsed === 'object') {
+          const problem = parsed as { detail?: string; title?: string }
+          message = problem.detail || problem.title || raw
+        }
+      } catch {
+        // Plain-text responses are already suitable for display.
+      }
+    }
+
+    if (!message) {
+      message = response.status === 403
+        ? 'Voc\u00ea n\u00e3o tem permiss\u00e3o para realizar esta a\u00e7\u00e3o.'
+        : `Erro na requisi\u00e7\u00e3o (${response.status}).`
+    }
+
+    throw new ApiError(response.status, message)
   }
 
   if (response.status === 204) {

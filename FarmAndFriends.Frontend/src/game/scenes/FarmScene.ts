@@ -36,6 +36,7 @@ function getGrowthProgress(plot: Plot): number {
 
 export default class FarmScene extends Phaser.Scene {
   private farm!: Farm
+  private modalBlockers = new Set<string>()
 
   constructor() {
     super('FarmScene')
@@ -46,7 +47,7 @@ export default class FarmScene extends Phaser.Scene {
   }
 
   preload() {
-    let file = 'thick_8x8';
+    const file = 'thick_8x8';
     this.load.bitmapFont(
       'farm-font',
       '/src/game/assets/fonts/' + file + '.png',
@@ -98,6 +99,7 @@ export default class FarmScene extends Phaser.Scene {
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('ui:modal', this.onModalToggle)
+      this.modalBlockers.clear()
     })
 
     // Evento de roubo
@@ -337,8 +339,17 @@ export default class FarmScene extends Phaser.Scene {
   }
 
   private onModalToggle = (e: Event) => {
-    const { open } = (e as CustomEvent<{ open: boolean }>).detail
-    this.input.enabled = !open
+    const { source = 'legacy', open } = (
+      e as CustomEvent<{ source?: string; open: boolean }>
+    ).detail
+
+    if (open) {
+      this.modalBlockers.add(source)
+    } else {
+      this.modalBlockers.delete(source)
+    }
+
+    this.input.enabled = this.modalBlockers.size === 0
   }
 
   private onFarmSync = (e: Event) => {

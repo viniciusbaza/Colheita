@@ -5,6 +5,7 @@ using FarmAndFriends.Api.Infrastructure.Data;
 using FarmAndFriends.Api.Dtos.Users;
 using FarmAndFriends.Api.Domain.Rules;
 using Microsoft.EntityFrameworkCore;
+using FarmAndFriends.Api.Contracts.Friends;
 
 namespace FarmAndFriends.Api.Controllers;
 
@@ -44,5 +45,31 @@ public class UsersController : ControllerBase
         };
 
         return Ok(dto);
+    }
+
+    [HttpGet("search")]
+    public async Task<IActionResult> Search(
+        [FromQuery] string? q,
+        [FromQuery] int take = 20)
+    {
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized();
+
+        if (string.IsNullOrWhiteSpace(q))
+            return BadRequest("Informe ao menos parte do nome de usu\u00e1rio.");
+
+        var normalizedQuery = q.Trim().ToUpperInvariant();
+        var limit = Math.Clamp(take, 1, 20);
+
+        var users = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.Id != userId && u.NormalizedUsername.StartsWith(normalizedQuery))
+            .OrderBy(u => u.Username)
+            .Take(limit)
+            .Select(u => new UserSearchResponse(u.Id, u.Username))
+            .ToListAsync();
+
+        return Ok(users);
     }
 }

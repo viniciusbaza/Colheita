@@ -27,8 +27,12 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
+        var normalizedUsername = NormalizeUsername(request.Username);
+        if (normalizedUsername == null)
+            return Unauthorized("Usu\u00e1rio ou senha inv\u00e1lidos");
+
         var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Username == request.Username);
+            .FirstOrDefaultAsync(u => u.NormalizedUsername == normalizedUsername);
 
         if (user == null)
             return Unauthorized("Usuário ou senha inválidos");
@@ -87,8 +91,17 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request)
     {
+        var username = request.Username?.Trim();
+        var normalizedUsername = NormalizeUsername(username);
+
+        if (normalizedUsername == null)
+            return BadRequest("Nome de usu\u00e1rio \u00e9 obrigat\u00f3rio");
+
+        if (username!.Length > 30)
+            return BadRequest("Nome de usu\u00e1rio muito longo");
+
         var exists = await _context.Users
-            .AnyAsync(u => u.Username == request.Username);
+            .AnyAsync(u => u.NormalizedUsername == normalizedUsername);
 
         if (exists)
             return BadRequest("Usuário já existe");
@@ -98,7 +111,8 @@ public class AuthController : ControllerBase
         var user = new User
         {
             Id = Guid.NewGuid(),
-            Username = request.Username
+            Username = username,
+            NormalizedUsername = normalizedUsername
         };
 
         user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
@@ -193,6 +207,14 @@ public class AuthController : ControllerBase
             Username = user.Username,
             FarmId = farm.Id
         });
+    }
+
+    private static string? NormalizeUsername(string? username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+            return null;
+
+        return username.Trim().ToUpperInvariant();
     }
 
     //public record RefreshRequest(string RefreshToken);

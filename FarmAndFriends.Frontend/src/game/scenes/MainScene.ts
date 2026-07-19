@@ -1,7 +1,6 @@
-import { useEffect, useRef } from 'react'
 import Phaser from 'phaser'
 
-class MainScene extends Phaser.Scene {
+export default class MainScene extends Phaser.Scene {
   constructor() {
     super('MainScene')
   }
@@ -16,4 +15,4 @@ class MainScene extends Phaser.Scene {
       color: '#ffffaa',
     })
   }
-} 
+}

@@ -1,189 +1,270 @@
-import { useInventory } from '../inventory/useInventory'
-import { useUser } from '../user/useUser'
-import { useAuth } from '../auth/useAuth'
-import { useNavigate } from 'react-router-dom'
-import { useFarm } from '../farm/FarmContext'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../auth/useAuth'
+import { useFarm } from '../farm/FarmContext'
+import { useInventory } from '../inventory/useInventory'
 import { xpToNextLevel } from '../rules/levelProgression'
-import { FriendsPanel } from './FriendsPanel'
+import { useSocial } from '../social/useSocial'
+import { NotificationType } from '../types/Social'
+import { useUser } from '../user/useUser'
+import { getNotificationMessage } from '../utils/notifications'
+import {
+  FriendsPanel,
+  type FriendsPanelTab,
+} from './FriendsPanel'
 import { InventoryPanel } from './InventoryPanel'
+import { NotificationsPanel } from './NotificationsPanel'
 import { ShopPanel } from '../shop/ShopPanel'
+
+function dispatchModalState(source: string, open: boolean) {
+  window.dispatchEvent(
+    new CustomEvent('ui:modal', {
+      detail: { source, open },
+    }),
+  )
+}
 
 export function PlayerHUD() {
   const { user } = useUser()
   const { farm, isVisiting, visitFarm, returnToOwnFarm, session } = useFarm()
   const { logout } = useAuth()
   const navigate = useNavigate()
-  const [showFriends, setShowFriends] = useState(false) 
-  const [showShop, setShowShop] = useState(false)
   const { inventory } = useInventory()
+  const {
+    incomingRequests,
+    unreadCount,
+    toastNotification,
+    dismissToast,
+    refreshSocial,
+    markNotificationAsRead,
+  } = useSocial()
+  const [showFriends, setShowFriends] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [showShop, setShowShop] = useState(false)
   const [showInventory, setShowInventory] = useState(false)
+  const [friendsInitialTab, setFriendsInitialTab] =
+    useState<FriendsPanelTab>('friends')
+  const [displayUser, setDisplayUser] = useState(user)
+
   const coins = inventory?.coins ?? 0
   const premiumCoins = inventory?.premiumCoins ?? 0
-
-
-  const mockFriends = [
-    {
-      userId: '2f6fe179-232d-4c60-b54e-6b52fca32a60',
-      username: 'tst',
-      farmId: 'f2405b6f-4604-4a60-8f3b-4565bcd2d894',
-      farmName: 'Fazenda do Rato',
-      avatarUrl: ''
-    },
-    {
-      userId: 'b1ca7432-971f-4abc-a3db-9200e8c93323',
-      username: 'usr',
-      farmId: '9079ef3d-98e0-41db-9972-f8dfa3611e1a',
-      farmName: 'Fazenda Feliz',
-      avatarUrl: ''
-    },
-    {
-      userId: '384d087ea-5800-4edd-810a-1e843f6b2843',
-      username: 'vin',
-      farmId: 'af9c3884-9700-47da-b35a-f28b7ab2cae3',
-      farmName: 'Sunny Farm',
-      avatarUrl: ''
-    },
-    {
-      userId: '4',
-      username: 'Mimi',
-      farmId: '',
-      farmName: 'Cantinho Verde',
-      avatarUrl: ''
-    }
-  ]
-
-  function handleLogout() {
-    logout()
-    navigate('/login')
-  }
-
-  if (!user) return null
-
-  const [displayUser, setDisplayUser] = useState(user)
 
   useEffect(() => {
     setDisplayUser(user)
   }, [user])
 
   useEffect(() => {
-    function onXpGained(e: Event) {
-      const { xpGained } = (e as CustomEvent<{ xpGained: number }>).detail
+    function onXpGained(event: Event) {
+      const { xpGained } = (event as CustomEvent<{ xpGained: number }>).detail
 
-      setDisplayUser(prev => {
-        if (!prev) return prev
+      setDisplayUser(previousUser => {
+        if (!previousUser) return previousUser
 
-        let newXp = prev.currentXp + xpGained
-        let newLevel = prev.level
-        let xpToNext = xpToNextLevel(newLevel)
+        let newXp = previousUser.currentXp + xpGained
+        let newLevel = previousUser.level
+        let nextLevelXp = xpToNextLevel(newLevel)
 
-        // ⬆️ level up
-        while (newXp >= xpToNext) {
-          newXp -= xpToNext
+        while (newXp >= nextLevelXp) {
+          newXp -= nextLevelXp
           newLevel += 1
-          xpToNext = xpToNextLevel(newLevel)
+          nextLevelXp = xpToNextLevel(newLevel)
         }
 
         return {
-          ...prev,
+          ...previousUser,
           level: newLevel,
           currentXp: newXp,
-          xpToNextLevel: xpToNext,
+          xpToNextLevel: nextLevelXp,
         }
       })
     }
 
     window.addEventListener('user:xp:gained', onXpGained)
-    return () =>
-      window.removeEventListener('user:xp:gained', onXpGained )
+    return () => window.removeEventListener('user:xp:gained', onXpGained)
   }, [])
+
+  useEffect(() => {
+    if (!toastNotification) return
+
+    const timeoutId = window.setTimeout(dismissToast, 6_000)
+    return () => window.clearTimeout(timeoutId)
+  }, [dismissToast, toastNotification])
+
+  function handleLogout() {
+    logout()
+    navigate('/login')
+  }
+
+  function openFriendsPanel(tab: FriendsPanelTab = 'friends') {
+    dismissToast()
+    setFriendsInitialTab(tab)
+    setShowFriends(true)
+    dispatchModalState('friends', true)
+  }
+
+  function closeFriendsPanel() {
+    setShowFriends(false)
+    dispatchModalState('friends', false)
+  }
+
+  function openNotificationsPanel() {
+    dismissToast()
+    setShowNotifications(true)
+    dispatchModalState('notifications', true)
+    void refreshSocial().catch(() => undefined)
+  }
+
+  function closeNotificationsPanel() {
+    setShowNotifications(false)
+    dispatchModalState('notifications', false)
+  }
+
+  function openInventoryPanel() {
+    setShowInventory(true)
+    dispatchModalState('inventory', true)
+  }
+
+  function closeInventoryPanel() {
+    setShowInventory(false)
+    dispatchModalState('inventory', false)
+  }
+
+  function openShopPanel() {
+    setShowShop(true)
+    dispatchModalState('shop', true)
+  }
+
+  function closeShopPanel() {
+    setShowShop(false)
+    dispatchModalState('shop', false)
+  }
+
+  function openToastNotification() {
+    if (!toastNotification) return
+
+    void markNotificationAsRead(toastNotification.id).catch(() => undefined)
+
+    if (toastNotification.type === NotificationType.FriendRequestReceived) {
+      openFriendsPanel('requests')
+      return
+    }
+
+    openNotificationsPanel()
+  }
+
+  if (!user || !displayUser) return null
 
   const xpPercent = (displayUser.currentXp / displayUser.xpToNextLevel) * 100
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between bg-green-900 p-4 pointer-events-auto">
-      <div className='hidden sm:block'>
-        {/* <p className="fixed top-0.5 left-0.5 text-[10px] font-mono text-white/40 tracking-wider select-none pointer-events-none">ID: {user.id}</p> */}
-        <p className="text-sm">🌾 Fazenda: {farm?.name}</p>
-        <p className="font-bold">👤 {displayUser.username}</p>
-        <div className="flex items-center gap-4">
-          <span className="text-sm">🪙 {coins}</span>
-          <span className="text-sm text-pink-300">💎 {premiumCoins}</span>
-        </div>
-      </div>
-      <div>
-        <p className="text-sm">⭐ Level {displayUser.level}</p>
-
-        <div className="w-32 sm:w-48 bg-green-700 h-2 rounded mt-1 overflow-hidden">
-          <div
-            className="bg-yellow-400 h-2 rounded transition-all duration-500 ease-out"
-            style={{ width: `${xpPercent}%` }}
-          />
+    <div className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-between bg-green-900 p-4">
+      <div className="flex items-center gap-4 sm:gap-8">
+        <div className="hidden sm:block">
+          <p className="text-sm">🌾 Fazenda: {farm?.name}</p>
+          <p className="font-bold">👤 {displayUser.username}</p>
+          <div className="flex items-center gap-4">
+            <span className="text-sm">🪙 {coins}</span>
+            <span className="text-sm text-pink-300">💎 {premiumCoins}</span>
+          </div>
         </div>
 
-        <small className="opacity-80">
-          {displayUser.currentXp}/{displayUser.xpToNextLevel} XP
-        </small>
+        <div>
+          <p className="text-sm">⭐ Level {displayUser.level}</p>
+          <div className="mt-1 h-2 w-32 overflow-hidden rounded bg-green-700 sm:w-48">
+            <div
+              className="h-2 rounded bg-yellow-400 transition-all duration-500 ease-out"
+              style={{ width: `${xpPercent}%` }}
+            />
+          </div>
+          <small className="opacity-80">
+            {displayUser.currentXp}/{displayUser.xpToNextLevel} XP
+          </small>
+        </div>
       </div>
 
       {isVisiting && (
-        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-40
-                        bg-amber-100 border border-amber-300
-                        rounded-full px-3 py-1 shadow
-                        flex items-center gap-3">
+        <div className="fixed left-1/2 top-24 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border border-amber-300 bg-amber-100 px-3 py-1 shadow">
           <span className="text-sm text-amber-900">
             👀 Visitando {farm?.name} de <strong>{session.ownerUsername}</strong>
           </span>
-
           <button
+            type="button"
             onClick={returnToOwnFarm}
-            className="text-sm bg-amber-500 text-white
-                      px-3 py-1 rounded-full
-                      hover:bg-amber-600 transition"
+            className="rounded-full bg-amber-500 px-3 py-1 text-sm text-white transition hover:bg-amber-600"
           >
             ⬅ Voltar
           </button>
         </div>
       )}
 
-      <div className="fixed top-7 right-20 z-40">
-        {/* DEV ONLY — será movido para o menu radial */}
-        <button
-          onClick={() => {
-            setShowFriends(true)
-            //Desliga o input no phaser
-            window.dispatchEvent(
-              new CustomEvent('ui:modal', {
-                detail: { open: true }
-              })
-            )
-          }}
-          className="rounded-full bg-emerald-600 px-4 py-1 text-white shadow hover:bg-emerald-700"
+      {toastNotification && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed right-4 top-24 z-[60] flex max-w-sm items-start gap-2 rounded-xl border border-emerald-300 bg-white p-3 text-emerald-950 shadow-xl"
         >
-          👥
+          <button type="button" onClick={openToastNotification} className="flex-1 text-left">
+            <span className="block text-xs font-bold uppercase tracking-wide text-emerald-600">
+              🔔 Nova interação
+            </span>
+            <span className="mt-1 block text-sm">
+              {getNotificationMessage(toastNotification)}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={dismissToast}
+            className="rounded px-2 text-lg text-emerald-600 hover:bg-emerald-50"
+            aria-label="Fechar notificação"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <div className="fixed right-20 top-7 z-40 flex gap-1">
+        <button
+          type="button"
+          onClick={openNotificationsPanel}
+          className="relative rounded-full bg-emerald-600 px-4 py-1 text-white shadow hover:bg-emerald-700"
+          aria-label={`Abrir notificações${unreadCount > 0 ? `, ${unreadCount} não lidas` : ''}`}
+        >
+          🔔
+          {unreadCount > 0 && (
+            <span className="absolute -right-2 -top-2 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white ring-2 ring-green-900">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
         </button>
 
         <button
-          onClick={() => {
-            setShowInventory(true)
-            //Desliga o input no phaser
-            window.dispatchEvent(
-              new CustomEvent('ui:modal', { detail: { open: true } })
-            )
-          }}
+          type="button"
+          onClick={() => openFriendsPanel('friends')}
+          className="relative rounded-full bg-emerald-600 px-4 py-1 text-white shadow hover:bg-emerald-700"
+          aria-label="Abrir amigos"
+        >
+          👥
+          {incomingRequests.length > 0 && (
+            <span className="absolute -right-2 -top-2 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white ring-2 ring-green-900">
+              {incomingRequests.length > 99 ? '99+' : incomingRequests.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={openInventoryPanel}
           className="rounded-full bg-emerald-600 px-4 py-1 text-white shadow hover:bg-amber-700"
+          aria-label="Abrir inventário"
         >
           🎒
         </button>
 
         <button
-          onClick={() => {
-            setShowShop(true)
-            window.dispatchEvent(
-              new CustomEvent('ui:modal', { detail: { open: true } })
-            )
-          }}
+          type="button"
+          onClick={openShopPanel}
           className="rounded-full bg-emerald-600 px-4 py-1 text-white shadow hover:bg-emerald-700"
+          aria-label="Abrir loja"
         >
           🏪
         </button>
@@ -191,53 +272,27 @@ export function PlayerHUD() {
 
       {showFriends && (
         <FriendsPanel
-          friends={mockFriends}
-          onClose={() => {
-            setShowFriends(false)
-            //liga novamente o input no phaser
-            window.dispatchEvent(
-              new CustomEvent('ui:modal', {
-                detail: { open: false }
-              })
-            )
-          }}
-          onVisitFriend={(friend) => {
-            visitFarm(
-              friend.farmId,
-              friend.userId,
-              friend.username
-            )
+          initialTab={friendsInitialTab}
+          onClose={closeFriendsPanel}
+          onVisitFriend={friend => {
+            visitFarm(friend.farmId, friend.userId, friend.username)
           }}
         />
       )}
 
-      {showInventory && (
-        <InventoryPanel
-          onClose={() => {
-            setShowInventory(false)
-            window.dispatchEvent(
-              new CustomEvent('ui:modal', { detail: { open: false } })
-            )
-          }}
-        />
+      {showNotifications && (
+        <NotificationsPanel onClose={closeNotificationsPanel} />
       )}
 
-      {showShop && (
-        <ShopPanel
-          onClose={() => {
-            setShowShop(false)
-            window.dispatchEvent(
-              new CustomEvent('ui:modal', { detail: { open: false } })
-            )
-          }}
-        />
-      )}
+      {showInventory && <InventoryPanel onClose={closeInventoryPanel} />}
+      {showShop && <ShopPanel onClose={closeShopPanel} />}
 
       <button
+        type="button"
         onClick={handleLogout}
-        className="text-sm bg-red-500 text-white px-3 py-1 rounded-full hover:bg-red-600"
+        className="rounded-full bg-red-500 px-3 py-1 text-sm text-white hover:bg-red-600"
       >
-         Sair
+        Sair
       </button>
     </div>
   )

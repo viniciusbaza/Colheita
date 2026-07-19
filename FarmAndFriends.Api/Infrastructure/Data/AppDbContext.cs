@@ -17,6 +17,8 @@ public class AppDbContext : DbContext
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
     public DbSet<TheftLog> TheftLogs => Set<TheftLog>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<Friendship> Friendships => Set<Friendship>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -28,9 +30,75 @@ public class AppDbContext : DbContext
             .WithMany(u => u.RefreshTokens)
             .HasForeignKey(r => r.UserId);
         
-        modelBuilder.Entity<User>()
-            .Property(u => u.Level)
-            .HasDefaultValue(1);
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.Property(u => u.Level)
+                .HasDefaultValue(1);
+
+            entity.HasIndex(u => u.NormalizedUsername)
+                .IsUnique();
+        });
+
+        modelBuilder.Entity<Friendship>(entity =>
+        {
+            entity.HasIndex(f => new { f.UserAId, f.UserBId })
+                .IsUnique();
+
+            entity.HasIndex(f => new { f.Status, f.RequestedByUserId });
+
+            entity.HasOne(f => f.UserA)
+                .WithMany()
+                .HasForeignKey(f => f.UserAId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(f => f.UserB)
+                .WithMany()
+                .HasForeignKey(f => f.UserBId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(f => f.RequestedByUser)
+                .WithMany()
+                .HasForeignKey(f => f.RequestedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_Friendships_DifferentUsers",
+                    "\"UserAId\" <> \"UserBId\"");
+
+                table.HasCheckConstraint(
+                    "CK_Friendships_RequesterIsParticipant",
+                    "\"RequestedByUserId\" = \"UserAId\" OR \"RequestedByUserId\" = \"UserBId\"");
+            });
+        });
+
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.HasIndex(n => new { n.RecipientUserId, n.ReadAt, n.CreatedAt });
+            entity.HasIndex(n => n.TheftLogId)
+                .IsUnique();
+
+            entity.HasOne(n => n.RecipientUser)
+                .WithMany()
+                .HasForeignKey(n => n.RecipientUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(n => n.ActorUser)
+                .WithMany()
+                .HasForeignKey(n => n.ActorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(n => n.Friendship)
+                .WithMany()
+                .HasForeignKey(n => n.FriendshipId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(n => n.TheftLog)
+                .WithMany()
+                .HasForeignKey(n => n.TheftLogId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
 
         modelBuilder.Entity<Plot>()
             .Ignore(p => p.IsReady);

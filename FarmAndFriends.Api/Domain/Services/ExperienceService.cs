@@ -29,7 +29,5 @@ public class ExperienceService
             user.CurrentXp -= LevelProgression.XpToNextLevel(user.Level);
             user.Level++;
         }
-
-        await _context.SaveChangesAsync();
     }   
 }

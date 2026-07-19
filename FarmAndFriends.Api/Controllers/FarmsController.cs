@@ -5,6 +5,7 @@ using System.Security.Claims;
 using FarmAndFriends.Api.Infrastructure.Data;
 using FarmAndFriends.Api.Contracts.Farms;
 using FarmAndFriends.Api.Domain.Entities;
+using FarmAndFriends.Api.Domain.Services;
 using FarmAndFriends.Api.Mappers;
 
 namespace FarmAndFriends.Api.Controllers;
@@ -16,11 +17,16 @@ public class FarmsController : ControllerBase
 {
     private readonly AppDbContext _context;
     private readonly FarmYieldService _farmYieldService;
+    private readonly FriendshipService _friendshipService;
 
-    public FarmsController(AppDbContext context, FarmYieldService farmYieldService)
+    public FarmsController(
+        AppDbContext context,
+        FarmYieldService farmYieldService,
+        FriendshipService friendshipService)
     {
         _context = context;
         _farmYieldService = farmYieldService;
+        _friendshipService = friendshipService;
     }
 
     [HttpGet("my")]
@@ -85,10 +91,15 @@ public class FarmsController : ControllerBase
         if (farm.UserId == userId)
             return BadRequest("Use /farms/my para acessar sua própria fazenda");
 
+        // ❌ Impede acessar fazendas de usuários que não são amigos
+        var areFriends = await _friendshipService.AreFriendsAsync(userId, farm.UserId);
+        if (!areFriends)
+            return Forbid();
+
         var now = DateTime.UtcNow;
 
-        // ⚠️ SIM, populamos remainingYield
-        // O roubo depende disso
+        // Populamos remainingYield
+        // ⚠️ O roubo depende disso
         await _farmYieldService.PopulateRemainingYieldAsync(farm, now);
 
         var baseResponse = FarmMapper.ToFarmResponse(farm, now);

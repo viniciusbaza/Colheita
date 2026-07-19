@@ -16,7 +16,7 @@ public class TheftService
         int alreadyStolenToday)
     {
         if (remainingYield <= 1)
-            throw new InvalidOperationException("Nada para roubar");
+            throw new InvalidOperationException("É proibido roubar o último item do lote.");
 
         // Limite diário escala com level
         var dailyLimit = BaseDailyLimit + (playerLevel / BaseDailyLimit);

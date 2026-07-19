@@ -16,12 +16,18 @@ public class TheftController : ControllerBase
     private readonly AppDbContext _context;
     private readonly TheftService _theftService;
     private readonly ExperienceService _experienceService;
+    private readonly FriendshipService _friendshipService;
 
-    public TheftController(AppDbContext context, TheftService theftService, ExperienceService experienceService)
+    public TheftController(
+        AppDbContext context,
+        TheftService theftService,
+        ExperienceService experienceService,
+        FriendshipService friendshipService)
     {
         _context = context;
         _theftService = theftService;
         _experienceService = experienceService;
+        _friendshipService = friendshipService;
     }
 
     [HttpPost]
@@ -38,6 +44,16 @@ public class TheftController : ControllerBase
 
         if (plot == null)
             return NotFound("Plot não encontrado");
+
+        if (plot.Farm.UserId == thiefUserId)
+            return BadRequest("Voc\u00ea n\u00e3o pode roubar a pr\u00f3pria fazenda.");
+
+        var areFriends = await _friendshipService.AreFriendsAsync(
+            thiefUserId,
+            plot.Farm.UserId);
+
+        if (!areFriends)
+            return Forbid();
 
         if (plot.SeedId == null)
             return BadRequest("Nada plantado");
@@ -120,17 +136,38 @@ public class TheftController : ControllerBase
         cropItem.Quantity += result.StolenAmount;
 
         // 7️⃣ Log do roubo
-        _context.TheftLogs.Add(new TheftLog
+        var now = DateTime.UtcNow;
+        var theftLog = new TheftLog
         {
+            Id = Guid.NewGuid(),
             FarmId = farmId,
             PlotId = plot.Id,
             ThiefUserId = thiefUserId,
             SeedId = seed.Id,
             Quantity = result.StolenAmount,
-            GotBonus = result.GotBonus
+            GotBonus = result.GotBonus,
+            CreatedAt = now
+        };
+
+        _context.TheftLogs.Add(theftLog);
+
+        // 8️⃣ Notificação persistente para o dono da fazenda
+        var theftMessage = result.GotBonus
+            ? $"{thief.Username} roubou {result.StolenAmount} unidades de {seed.Name.ToLower()} da sua fazenda."
+            : $"{thief.Username} roubou {result.StolenAmount} {seed.Name.ToLower()} da sua fazenda.";
+
+        _context.Notifications.Add(new Notification
+        {
+            Id = Guid.NewGuid(),
+            RecipientUserId = plot.Farm.UserId,
+            ActorUserId = thiefUserId,
+            Type = NotificationType.TheftOccurred,
+            Message = theftMessage,
+            TheftLogId = theftLog.Id,
+            CreatedAt = now
         });
 
-        // 8️⃣ Ganho de XP por roubo
+        // 9️⃣ Ganho de XP por roubo
         if (result.XpGained > 0)
         {
             await _experienceService.AddXpAsync(thiefUserId, result.XpGained);
