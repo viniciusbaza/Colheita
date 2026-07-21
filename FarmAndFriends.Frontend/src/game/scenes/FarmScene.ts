@@ -1,8 +1,14 @@
 import Phaser from 'phaser'
 import { gridToIso } from '../iso/isoUtils'
-import type { Farm, Plot, PlotHarvestDone, PlotStealDone } from '../../types/Farm'
+import type {
+  Farm,
+  Plot,
+  PlotHarvestDone,
+  PlotPlantDone,
+  PlotStealDone,
+} from '../../types/Farm'
 
-type XpSource = 'HARVEST' | 'STEAL'
+type XpSource = 'HARVEST' | 'PLANT' | 'STEAL'
 
 const TILE_WIDTH = 64
 const TILE_HEIGHT = 32
@@ -80,6 +86,13 @@ export default class FarmScene extends Phaser.Scene {
     for (const plot of this.farm.plots) {
       this.createPlot(plot, originX, originY)
     }
+    // Escuta evento de plantio
+    window.addEventListener('plot:plant:done', this.onPlantDone)
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener('plot:plant:done', this.onPlantDone)
+    })
+
     // Escuta evento de colheita
     window.addEventListener('plot:harvest:done', this.onHarvestDone)
 
@@ -398,6 +411,17 @@ export default class FarmScene extends Phaser.Scene {
     this.harvestPlot(tile, xpGained)
   }
 
+  private onPlantDone = (e: Event) => {
+    const { plotId, xpGained } = (e as CustomEvent<PlotPlantDone>).detail
+
+    const tile = this.plotTiles.get(plotId)
+    if (!tile) return
+
+    this.time.delayedCall(0, () => {
+      this.spawnXp(tile.x, tile.y - 30, xpGained, 'PLANT')
+    })
+  }
+
   private harvestPlot(tile: Phaser.GameObjects.Image, xpGained: number) {
     tile.setAlpha(0.3)
     tile.disableInteractive()
@@ -484,6 +508,11 @@ export default class FarmScene extends Phaser.Scene {
       HARVEST: {
         color: '#7CFF7C',
         stroke: '#1B5E20',
+        scale: 1.2,
+      },
+      PLANT: {
+        color: '#ffd17c',
+        stroke: '#5e341b',
         scale: 1.2,
       },
       STEAL: {

@@ -12,6 +12,7 @@ export type UserContextType = {
   user: User | null
   loading: boolean
   refreshUser: () => Promise<void>
+  addXp: (xpGained: number) => void
 }
 
 export const UserContext = createContext<UserContextType | null>(null)

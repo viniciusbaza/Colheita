@@ -3,6 +3,7 @@ import { UserContext } from './UserContext'
 import type { User } from './UserContext'
 import { authFetch } from '../api/http'
 import { useAuth } from '../auth/useAuth'
+import { applyXpGain } from './applyXpGain'
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const { token } = useAuth()
@@ -40,12 +41,20 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     return loadUser(false)
   }, [loadUser])
 
+  const addXp = useCallback((xpGained: number) => {
+    if (!Number.isInteger(xpGained) || xpGained <= 0) return
+
+    setUser(currentUser =>
+      currentUser ? applyXpGain(currentUser, xpGained) : currentUser,
+    )
+  }, [])
+
   useEffect(() => {
     void loadUser(true).catch(() => undefined)
   }, [loadUser])
 
   return (
-    <UserContext.Provider value={{ user, loading, refreshUser }}>
+    <UserContext.Provider value={{ user, loading, refreshUser, addXp }}>
       {children}
     </UserContext.Provider>
   )

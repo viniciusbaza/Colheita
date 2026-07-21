@@ -1,3 +1,8 @@
+export type PlotPlantDone = {
+  plotId: string
+  xpGained: number
+}
+
 export type PlotStealDone = {
   plotId: string
   stolen: number
@@ -19,6 +24,14 @@ export type StealResponse = {
   plotId: string
   stolen: number
   ownerWillReceive: number
+  xpGained: number
+}
+
+export type PlantResponse = {
+  id: string
+  seed: string
+  plantedAt: string
+  readyAt: string
   xpGained: number
 }
 

@@ -1,13 +1,14 @@
 import { useFarm } from '../farm/FarmContext'
-import type { HarvestResponse, StealResponse } from '../types/Farm'
+import type { HarvestResponse, PlantResponse, StealResponse } from '../types/Farm'
 import { authFetch } from '../api/http'
 import { useInventory } from '../inventory/useInventory'
 import { useEffect, useState } from 'react'
 import { formatTimeRemaining } from '../utils/time'
 import { useSeeds } from '../seeds/useSeeds'
+import { useUser } from '../user/useUser'
 
 type Props = {
-  plotId: String
+  plotId: string
   onClose: () => void
 }
 
@@ -15,9 +16,10 @@ export function PlotModal({ plotId, onClose }: Props) {
   const { farm, refreshFarm, isVisiting, canInteract } = useFarm()
   const { getSeed } = useSeeds()
   const { inventory, refreshInventory } = useInventory()
+  const { addXp } = useUser()
 
   const [stealError, setStealError] = useState<string | null>(null)
-  const [timeLeft, setTimeLeft] = useState<string | null>(null)
+  const [currentTime, setCurrentTime] = useState(Date.now)
 
   const seeds = canInteract 
   ? inventory?.items.filter(i => i.itemType === 'Seed' && i.quantity > 0) ?? []
@@ -27,23 +29,18 @@ export function PlotModal({ plotId, onClose }: Props) {
   const farmId = farm?.id
 
   const seedCatalog = getSeed(plot?.seedId ?? undefined)
+  const readyAt = plot?.readyAt
+  const timeLeft = readyAt
+    ? formatTimeRemaining(readyAt, currentTime)
+    : null
 
   useEffect(() => {
-    const readyAt = plot?.readyAt
-    if (!readyAt) {
-      setTimeLeft(null)
-      return
-    } 
+    if (!readyAt) return
 
-    function updateTime() {
-      setTimeLeft(formatTimeRemaining(readyAt as string))
-    }
-
-    updateTime()
-    const interval = setInterval(updateTime, 1000)
+    const interval = setInterval(() => setCurrentTime(Date.now()), 1000)
 
     return () => clearInterval(interval)
-  }, [plot?.readyAt])
+  }, [readyAt])
 
   if (!plot) return null
 
@@ -51,7 +48,7 @@ export function PlotModal({ plotId, onClose }: Props) {
     if (isVisiting) return
 
     try {
-      await authFetch(
+      const data = await authFetch<PlantResponse>(
         `/plots/${plotId}/plant`,
         {
           method: 'POST',
@@ -59,12 +56,16 @@ export function PlotModal({ plotId, onClose }: Props) {
         }
       )
 
-      // Avisa o HUD para atualizar a xp
       window.dispatchEvent(
-        new CustomEvent('user:xp:gained', {
-          detail: { xpGained: 5 }
-        })
+        new CustomEvent('plot:plant:done', {
+          detail: {
+            plotId,
+            xpGained: data.xpGained,
+          },
+        }),
       )
+
+      addXp(data.xpGained)
 
       onClose()
 
@@ -96,12 +97,7 @@ export function PlotModal({ plotId, onClose }: Props) {
           }
         })
       )
-      // Avisa o HUD para atualizar a xp
-      window.dispatchEvent(
-        new CustomEvent('user:xp:gained', {
-          detail: { xpGained: data.xpGained }
-        })
-      )
+      addXp(data.xpGained)
 
       // Fecha o modal
       onClose()
@@ -134,12 +130,7 @@ export function PlotModal({ plotId, onClose }: Props) {
         })
       )
 
-      // Avisa o HUD para atualizar a XP
-      window.dispatchEvent(
-        new CustomEvent('user:xp:gained', {
-          detail: { xpGained: data.xpGained }
-        })
-      )
+      addXp(data.xpGained)
 
       onClose()
       await refreshFarm()

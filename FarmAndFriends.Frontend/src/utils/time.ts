@@ -1,5 +1,4 @@
-export function formatTimeRemaining(readyAt: string) {
-  const now = Date.now()
+export function formatTimeRemaining(readyAt: string, now = Date.now()) {
   const readyTime = new Date(readyAt).getTime()
 
   const diffMs = readyTime - now

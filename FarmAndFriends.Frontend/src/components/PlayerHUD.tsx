@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { useFarm } from '../farm/FarmContext'
 import { useInventory } from '../inventory/useInventory'
-import { xpToNextLevel } from '../rules/levelProgression'
 import { useSocial } from '../social/useSocial'
 import { NotificationType } from '../types/Social'
 import { useUser } from '../user/useUser'
@@ -44,44 +43,9 @@ export function PlayerHUD() {
   const [showInventory, setShowInventory] = useState(false)
   const [friendsInitialTab, setFriendsInitialTab] =
     useState<FriendsPanelTab>('friends')
-  const [displayUser, setDisplayUser] = useState(user)
 
   const coins = inventory?.coins ?? 0
   const premiumCoins = inventory?.premiumCoins ?? 0
-
-  useEffect(() => {
-    setDisplayUser(user)
-  }, [user])
-
-  useEffect(() => {
-    function onXpGained(event: Event) {
-      const { xpGained } = (event as CustomEvent<{ xpGained: number }>).detail
-
-      setDisplayUser(previousUser => {
-        if (!previousUser) return previousUser
-
-        let newXp = previousUser.currentXp + xpGained
-        let newLevel = previousUser.level
-        let nextLevelXp = xpToNextLevel(newLevel)
-
-        while (newXp >= nextLevelXp) {
-          newXp -= nextLevelXp
-          newLevel += 1
-          nextLevelXp = xpToNextLevel(newLevel)
-        }
-
-        return {
-          ...previousUser,
-          level: newLevel,
-          currentXp: newXp,
-          xpToNextLevel: nextLevelXp,
-        }
-      })
-    }
-
-    window.addEventListener('user:xp:gained', onXpGained)
-    return () => window.removeEventListener('user:xp:gained', onXpGained)
-  }, [])
 
   useEffect(() => {
     if (!toastNotification) return
@@ -152,16 +116,16 @@ export function PlayerHUD() {
     openNotificationsPanel()
   }
 
-  if (!user || !displayUser) return null
+  if (!user) return null
 
-  const xpPercent = (displayUser.currentXp / displayUser.xpToNextLevel) * 100
+  const xpPercent = (user.currentXp / user.xpToNextLevel) * 100
 
   return (
     <div className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-between bg-green-900 p-4">
       <div className="flex items-center gap-4 sm:gap-8">
         <div className="hidden sm:block">
           <p className="text-sm">🌾 Fazenda: {farm?.name}</p>
-          <p className="font-bold">👤 {displayUser.username}</p>
+          <p className="font-bold">👤 {user.username}</p>
           <div className="flex items-center gap-4">
             <span className="text-sm">🪙 {coins}</span>
             <span className="text-sm text-pink-300">💎 {premiumCoins}</span>
@@ -169,7 +133,7 @@ export function PlayerHUD() {
         </div>
 
         <div>
-          <p className="text-sm">⭐ Level {displayUser.level}</p>
+          <p className="text-sm">⭐ Level {user.level}</p>
           <div className="mt-1 h-2 w-32 overflow-hidden rounded bg-green-700 sm:w-48">
             <div
               className="h-2 rounded bg-yellow-400 transition-all duration-500 ease-out"
@@ -177,7 +141,7 @@ export function PlayerHUD() {
             />
           </div>
           <small className="opacity-80">
-            {displayUser.currentXp}/{displayUser.xpToNextLevel} XP
+            {user.currentXp}/{user.xpToNextLevel} XP
           </small>
         </div>
       </div>
