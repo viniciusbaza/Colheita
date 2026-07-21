@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { authFetch } from '../api/http'
 import { type Farm } from '../types/Farm'
+import { getNextPlotReadyAt } from '../utils/time'
+
+const FARM_POLL_INTERVAL_MS = 30_000
+const READY_SYNC_BUFFER_MS = 150
 
 type FarmSession = {
   mode: 'OWN' | 'VISITING'
@@ -11,6 +15,7 @@ type FarmSession = {
 
 export function useFarmInternal() {
   const [farm, setFarm] = useState<Farm | null>(null)
+  const activeFarmIdRef = useRef<string | null>(null)
   const [session, setSession] = useState<FarmSession>({
     mode: 'OWN',
     farmId: 'my',
@@ -20,7 +25,7 @@ export function useFarmInternal() {
   const isVisiting = session.mode === 'VISITING'
   const canInteract = session.mode === 'OWN'
 
-  async function fetchFarm() {  
+  const fetchFarm = useCallback(async () => {
     try {
       const endpoint =
         session.mode === 'OWN'
@@ -28,7 +33,8 @@ export function useFarmInternal() {
           : `/farms/${session.farmId}`
 
       const data = await authFetch<Farm>(endpoint)
-      const isNewFarm = !farm || farm.id !== data.id
+      const isNewFarm = activeFarmIdRef.current !== data.id
+      activeFarmIdRef.current = data.id
       setFarm(data)
 
       window.dispatchEvent(
@@ -37,19 +43,20 @@ export function useFarmInternal() {
           { detail: data }
         )
       )
-    } catch (err) {
+    } catch {
       console.warn('Sessão expirada, redirecionando...')
       setFarm(null)
     } finally {
       setLoading(false)
     }
-  }
+  }, [session.farmId, session.mode])
 
   function visitFarm(
     farmId: string,
     ownerUserId: string,
     ownerUsername: string
   ) {
+    activeFarmIdRef.current = null
     setFarm(null)
     setLoading(true)
     setSession({
@@ -61,6 +68,7 @@ export function useFarmInternal() {
   }
 
   function returnToOwnFarm() {
+    activeFarmIdRef.current = null
     setFarm(null)
     setLoading(true)
     setSession({
@@ -71,25 +79,27 @@ export function useFarmInternal() {
   }
 
   useEffect(() => {
-    fetchFarm()
-  }, [session.mode, session.farmId])
+    void fetchFarm()
+  }, [fetchFarm])
+
+  const nextPlotReadyAt = getNextPlotReadyAt(farm?.plots ?? [])
 
   useEffect(() => {
-    if (!farm) return
-    if (session.mode !== 'OWN') return
-
-    const hasGrowing = farm.plots.some(
-      p => p.seedId && !p.isReady
-    )
-
-    if (!hasGrowing) return
+    if (nextPlotReadyAt === null) return
 
     const interval = setInterval(() => {
-      fetchFarm()
-    }, 30_000) // a cada 30 segundos
+      void fetchFarm()
+    }, FARM_POLL_INTERVAL_MS)
 
-    return () => clearInterval(interval)
-  }, [farm?.id, session.mode])
+    const readyTimeout = setTimeout(() => {
+      void fetchFarm()
+    }, Math.max(0, nextPlotReadyAt - Date.now()) + READY_SYNC_BUFFER_MS)
+
+    return () => {
+      clearInterval(interval)
+      clearTimeout(readyTimeout)
+    }
+  }, [fetchFarm, nextPlotReadyAt])
 
   return { 
     farm, 

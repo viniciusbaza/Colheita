@@ -121,18 +121,6 @@ export default class FarmScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('plot:steal:done', this.onStealDone)
     })
-    
-
-    // 🔄 Sincronização periódica da fazenda
-    this.time.addEvent({
-      delay: 60_000, // 60s
-      loop: true,
-      callback: () => {
-        this.onFarmSync(
-          new CustomEvent('farm:sync', { detail: this.farm })
-        )
-      }
-    })
   }
 
   private plotTiles = new Map<string, Phaser.GameObjects.Image>()
