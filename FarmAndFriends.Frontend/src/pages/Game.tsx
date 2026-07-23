@@ -5,12 +5,17 @@ import { PlayerHUD } from '../components/PlayerHUD'
 import { PhaserGame } from '../game/PhaserGame'
 import { PlotModal } from '../components/PlotModal'
 import { clamp } from '../utils/math'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import type { FarmCameraMode } from '../game/farmCamera'
 
 export default function Game() {
   const { user, loading } = useUser()
   const { farm, loading: farmLoading } = useFarm()
   const { selectedPlot, closePlot } = usePlotInteraction()
+  const [cameraPreference, setCameraPreference] = useState<{
+    farmId: string | null
+    mode: FarmCameraMode
+  }>({ farmId: null, mode: 'focus' })
 
   useEffect(() => {
     window.dispatchEvent(
@@ -47,15 +52,29 @@ export default function Game() {
     )
   }
 
+  const farmId = farm.id
+  const cameraMode =
+    cameraPreference.farmId === farmId
+      ? cameraPreference.mode
+      : 'focus'
+
+  function changeCameraMode(mode: FarmCameraMode) {
+    closePlot()
+    setCameraPreference({ farmId, mode })
+  }
+
   // Estado autenticado
   return (
-    <div className="w-screen h-screen overflow-hidden bg-green-100 text-white">
+    <div className="relative h-screen w-screen overflow-hidden bg-[#dff5ff] text-white">
 
       {/* Phaser ocupa todo o espaço */}
-      <PhaserGame farm={farm} />
+      <PhaserGame farm={farm} cameraMode={cameraMode} />
 
       {/* HUD flutuante */}
-      <PlayerHUD />
+      <PlayerHUD
+        cameraMode={cameraMode}
+        onCameraModeChange={changeCameraMode}
+      />
 
       {/* Modal do Plot */}
       {selectedPlot && (() => {
