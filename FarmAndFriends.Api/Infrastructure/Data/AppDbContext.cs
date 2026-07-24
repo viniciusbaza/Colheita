@@ -149,6 +149,19 @@ public class AppDbContext : DbContext
                 MinLevel = 3,
                 CropId = "tomato_crop",
                 CropAmount = 4
+            },
+            new Seed
+            {
+                Id = "pumpkin",
+                Name = "Abóbora",
+                Icon = "🎃",
+                BuyPrice = 40,
+                SellPrice = 80,
+                GrowTime = TimeSpan.FromMinutes(2),
+                TheftChancePercent = 100,
+                MinLevel = 4,
+                CropId = "pumpkin_crop",
+                CropAmount = 5
             }
         );
 
