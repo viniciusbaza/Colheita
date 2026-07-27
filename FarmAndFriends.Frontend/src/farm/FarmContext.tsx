@@ -1,9 +1,5 @@
-import { createContext, useContext } from 'react'
+import { FarmContext } from './FarmContextValue'
 import { useFarmInternal } from './useFarm'
-
-const FarmContext = createContext<
-  ReturnType<typeof useFarmInternal> | null
->(null)
 
 export function FarmProvider({ children }: { children: React.ReactNode }) {
   const farm = useFarmInternal()
@@ -12,12 +8,4 @@ export function FarmProvider({ children }: { children: React.ReactNode }) {
       {children}
     </FarmContext.Provider>
   )
-}
-
-export function useFarm() {
-  const ctx = useContext(FarmContext)
-  if (!ctx) {
-    throw new Error('useFarm must be used inside FarmProvider')
-  }
-  return ctx
 }

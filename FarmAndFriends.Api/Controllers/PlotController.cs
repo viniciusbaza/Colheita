@@ -1,6 +1,7 @@
 using FarmAndFriends.Api.Contracts.Plots;
 using FarmAndFriends.Api.Domain.Entities;
 using FarmAndFriends.Api.Domain.Enums;
+using FarmAndFriends.Api.Domain.Rules;
 using FarmAndFriends.Api.Domain.Services;
 using FarmAndFriends.Api.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -18,7 +19,9 @@ public class PlotController : ControllerBase
     private readonly AppDbContext _context;
     private readonly ExperienceService _experienceService;
 
-    public PlotController(AppDbContext context, ExperienceService experienceService)
+    public PlotController(
+        AppDbContext context,
+        ExperienceService experienceService)
     {
         _context = context;
         _experienceService = experienceService;
@@ -32,6 +35,13 @@ public class PlotController : ControllerBase
         var userId = Guid.Parse(
             User.FindFirstValue(ClaimTypes.NameIdentifier)!
         );
+
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
+        var lockedUser = await _context.LockAsync(userId);
+
+        if (lockedUser == null)
+            return Unauthorized();
 
         // 1 Buscar o plot com a farm e o user
         var plot = await _context.Plots
@@ -90,12 +100,14 @@ public class PlotController : ControllerBase
         plot.PlantedAt = now;
         plot.ReadyAt = now.Add(seed.GrowTime);
         plot.RemainingYield = seed.CropAmount;
+        CropCareRules.StartCurrentCropCycle(plot);
 
         const int xpGained = 10;
 
-        await _experienceService.AddXpAsync(userId, xpGained);
+        _experienceService.AddXp(lockedUser, xpGained);
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return Ok(new
         {
@@ -113,6 +125,13 @@ public class PlotController : ControllerBase
         var userId = Guid.Parse(
             User.FindFirstValue(ClaimTypes.NameIdentifier)!
         );
+
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
+        var lockedUser = await _context.LockAsync(userId);
+
+        if (lockedUser == null)
+            return Unauthorized();
 
         var plot = await _context.Plots
             .Include(p => p.Farm)
@@ -183,12 +202,14 @@ public class PlotController : ControllerBase
         plot.SeedId = null;
         plot.PlantedAt = null;
         plot.ReadyAt = null;
+        CropCareRules.ClearCurrentOpportunity(plot);
 
         var xpGained = 25 * seed.MinLevel;
 
-        await _experienceService.AddXpAsync(userId, xpGained);
+        _experienceService.AddXp(lockedUser, xpGained);
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return Ok(new
         {

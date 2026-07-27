@@ -1,5 +1,10 @@
-import { useFarm } from '../farm/FarmContext'
-import type { HarvestResponse, PlantResponse, StealResponse } from '../types/Farm'
+import { useFarm } from '../farm/useFarmContext'
+import type {
+  CareResponse,
+  HarvestResponse,
+  PlantResponse,
+  StealResponse,
+} from '../types/Farm'
 import { authFetch } from '../api/http'
 import { useInventory } from '../inventory/useInventory'
 import { useEffect, useState } from 'react'
@@ -19,6 +24,8 @@ export function PlotModal({ plotId, onClose }: Props) {
   const { addXp } = useUser()
 
   const [stealError, setStealError] = useState<string | null>(null)
+  const [careError, setCareError] = useState<string | null>(null)
+  const [carePending, setCarePending] = useState(false)
   const [currentTime, setCurrentTime] = useState(Date.now)
 
   const seeds = canInteract 
@@ -27,11 +34,24 @@ export function PlotModal({ plotId, onClose }: Props) {
 
   const plot = farm?.plots.find(p => p.id === plotId)
   const farmId = farm?.id
+  const care = plot?.care
+  const nextCareAt = care?.nextCareAt
+  const canCareNow = Boolean(care?.canCare)
+  const careOpportunityId = canCareNow
+    ? care?.opportunityId ?? null
+    : null
 
   const seedCatalog = getSeed(plot?.seedId ?? undefined)
   const readyAt = plot?.readyAt
   const timeLeft = readyAt
     ? formatTimeRemaining(readyAt, currentTime)
+    : null
+  const nextCareAtTime = nextCareAt
+    ? new Date(nextCareAt).getTime()
+    : Number.NaN
+  const careTimeLeft = Number.isFinite(nextCareAtTime)
+    && nextCareAtTime > currentTime
+    ? formatTimeRemaining(nextCareAt!, currentTime)
     : null
 
   useEffect(() => {
@@ -152,6 +172,61 @@ export function PlotModal({ plotId, onClose }: Props) {
       )
     }
   }
+
+  async function handleCare() {
+    if (
+      !isVisiting ||
+      !farmId ||
+      !careOpportunityId ||
+      carePending
+    ) {
+      return
+    }
+
+    setCareError(null)
+    setCarePending(true)
+
+    try {
+      const data = await authFetch<CareResponse>(
+        `/farms/${farmId}/plots/${plotId}/care`,
+        {
+          method: 'POST',
+          headers: {
+            'Idempotency-Key': crypto.randomUUID(),
+          },
+          body: JSON.stringify({
+            careOpportunityId,
+          }),
+        },
+      )
+
+      window.dispatchEvent(
+        new CustomEvent('plot:care:done', {
+          detail: {
+            plotId,
+            coinsGained: data.coinsGained,
+            xpGained: data.xpGained,
+            caredByUsername: data.caredByUsername,
+          },
+        }),
+      )
+      window.dispatchEvent(new Event('inventory:changed'))
+      addXp(data.xpGained)
+
+      onClose()
+      await refreshFarm()
+    } catch (err) {
+      const message = err instanceof Error
+        ? err.message
+        : 'Não foi possível deixar o cuidado.'
+
+      setCareError(message)
+      await refreshFarm()
+    } finally {
+      setCarePending(false)
+    }
+  }
+
   return (
     <div className="plot-modal" onPointerDown={(e) => e.stopPropagation()}>
       
@@ -190,6 +265,27 @@ export function PlotModal({ plotId, onClose }: Props) {
       {plot.seedId && seedCatalog && (
         <>
           <p className="text-xs">{seedCatalog.icon} {seedCatalog.name}</p>
+          {!isVisiting && (plot.care?.caregiverCount ?? 0) > 0 && (
+            <p className="mt-1 text-xs font-semibold text-sky-700">
+              💧 Regada por{' '}
+              {plot.care!.caregivers
+                .map(caregiver => caregiver.username)
+                .join(', ')}
+              {plot.care!.caregiverCount
+                > plot.care!.caregivers.length
+                ? ` e +${plot.care!.caregiverCount
+                    - plot.care!.caregivers.length}`
+                : ''}
+            </p>
+          )}
+          {isVisiting
+            && plot.care?.viewerCared
+            && !canCareNow
+            && careTimeLeft && (
+            <p className="mt-1 text-xs font-semibold text-sky-700">
+              💧 Você regou recentemente. Regue novamente em {careTimeLeft}.
+            </p>
+          )}
           <div className="plot-actions">
             {plot.isReady ? (
               isVisiting ? (
@@ -206,12 +302,40 @@ export function PlotModal({ plotId, onClose }: Props) {
                 </div>
               )
             ) : (
-              <div className="plot-action disabled">
-                ⏳ {`Pronto em ${timeLeft}`}
-              </div>
+              <>
+                {isVisiting && canCareNow && (
+                  <button
+                    type="button"
+                    className="plot-action care"
+                    onClick={() => void handleCare()}
+                    disabled={carePending}
+                  >
+                    {carePending ? '💧 Regando...' : '💧 Regar'}
+                  </button>
+                )}
+                <div className="plot-action disabled">
+                  ⏳ {`Pronto em ${timeLeft}`}
+                </div>
+              </>
             )}
           </div>
+          {isVisiting
+            && canCareNow
+            && plot.care?.rewardAvailable === false && (
+              <p className="mt-1 max-w-52 text-[11px] leading-snug text-amber-700">
+                Seu limite de recompensas nesse lote foi atingido.
+              </p>
+            )}
         </>
+      )}
+
+      {careError && (
+        <div className="
+          mt-2 rounded-lg border border-sky-200
+          bg-sky-50 px-3 py-2 text-sm text-sky-800
+        ">
+          💧 {careError}
+        </div>
       )}
 
       {stealError && (

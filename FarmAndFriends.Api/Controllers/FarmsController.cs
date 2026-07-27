@@ -18,29 +18,34 @@ public class FarmsController : ControllerBase
     private readonly AppDbContext _context;
     private readonly FarmYieldService _farmYieldService;
     private readonly FriendshipService _friendshipService;
+    private readonly CropCareService _cropCareService;
 
     public FarmsController(
         AppDbContext context,
         FarmYieldService farmYieldService,
-        FriendshipService friendshipService)
+        FriendshipService friendshipService,
+        CropCareService cropCareService)
     {
         _context = context;
         _farmYieldService = farmYieldService;
         _friendshipService = friendshipService;
+        _cropCareService = cropCareService;
     }
 
     [HttpGet("my")]
     public async Task<IActionResult> GetMyFarm()
     {
-        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        if (userId == null)
+        if (!Guid.TryParse(
+                User.FindFirstValue(ClaimTypes.NameIdentifier),
+                out var userId))
+        {
             return Unauthorized();
+        }
 
         var farm = await _context.Farms
             .Include(f => f.User)
             .Include(f => f.Plots)
-            .FirstOrDefaultAsync(f => f.UserId == Guid.Parse(userId));
+            .FirstOrDefaultAsync(f => f.UserId == userId);
 
         if (farm == null)
             return NotFound("Fazenda não encontrada");
@@ -49,7 +54,16 @@ public class FarmsController : ControllerBase
 
         await _farmYieldService.PopulateRemainingYieldAsync(farm, now);
 
-        var baseResponse = FarmMapper.ToFarmResponse(farm, now);
+        var careStates = await _cropCareService.GetFarmCareStatesAsync(
+            farm.Id,
+            userId,
+            farm.UserId,
+            farm.Plots,
+            now);
+        var baseResponse = FarmMapper.ToFarmResponse(
+            farm,
+            now,
+            careStates);
 
         return Ok(new
         {
@@ -64,10 +78,11 @@ public class FarmsController : ControllerBase
                 p.Y,
                 p.Unlocked,
                 p.SeedId,
-                plantedAt = farm.Plots.First(pl => pl.Id == p.Id).PlantedAt,
+                p.PlantedAt,
                 p.IsReady,
                 p.ReadyAt,
-                p.RemainingYield
+                p.RemainingYield,
+                p.Care
             })
         });
     }
@@ -102,7 +117,16 @@ public class FarmsController : ControllerBase
         // ⚠️ O roubo depende disso
         await _farmYieldService.PopulateRemainingYieldAsync(farm, now);
 
-        var baseResponse = FarmMapper.ToFarmResponse(farm, now);
+        var careStates = await _cropCareService.GetFarmCareStatesAsync(
+            farm.Id,
+            userId,
+            farm.UserId,
+            farm.Plots,
+            now);
+        var baseResponse = FarmMapper.ToFarmResponse(
+            farm,
+            now,
+            careStates);
 
         return Ok(new
         {
@@ -117,9 +141,11 @@ public class FarmsController : ControllerBase
                 p.Y,
                 p.Unlocked,
                 p.SeedId,
+                p.PlantedAt,
                 p.IsReady,
                 p.ReadyAt,
-                p.RemainingYield
+                p.RemainingYield,
+                p.Care
             })
         });
     }

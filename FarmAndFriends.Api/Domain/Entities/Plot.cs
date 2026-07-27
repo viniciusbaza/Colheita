@@ -19,4 +19,6 @@ public class Plot
     public bool IsReady => ReadyAt <= DateTime.UtcNow;
 
     public int? RemainingYield { get; set; }
+
+    public Guid? CareOpportunityId { get; set; }
 }

@@ -19,6 +19,10 @@ public class AppDbContext : DbContext
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Friendship> Friendships => Set<Friendship>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<CropCareCompletion> CropCareCompletions =>
+        Set<CropCareCompletion>();
+    public DbSet<VisitorFarmCareCycle> VisitorFarmCareCycles =>
+        Set<VisitorFarmCareCycle>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -76,7 +80,17 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Notification>(entity =>
         {
             entity.HasIndex(n => new { n.RecipientUserId, n.ReadAt, n.CreatedAt });
+            entity.HasIndex(n => new { n.Type, n.ActorUserId, n.CreatedAt });
+            entity.HasIndex(n => new
+            {
+                n.Type,
+                n.ActorUserId,
+                n.RecipientUserId,
+                n.CreatedAt
+            });
             entity.HasIndex(n => n.TheftLogId)
+                .IsUnique();
+            entity.HasIndex(n => n.CareOpportunityId)
                 .IsUnique();
 
             entity.HasOne(n => n.RecipientUser)
@@ -100,8 +114,116 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
-        modelBuilder.Entity<Plot>()
-            .Ignore(p => p.IsReady);
+        modelBuilder.Entity<CropCareCompletion>(entity =>
+        {
+            entity.HasIndex(completion => new
+                {
+                    completion.VisitorUserId,
+                    completion.CareOpportunityId,
+                    completion.CaredAt
+                });
+
+            entity.HasIndex(completion => new
+                {
+                    completion.VisitorFarmCareCycleId,
+                    completion.CareOpportunityId
+                });
+
+            entity.HasIndex(completion => new
+            {
+                completion.CareOpportunityId,
+                completion.CaredAt
+            });
+
+            entity.HasIndex(completion => new
+                {
+                    completion.VisitorUserId,
+                    completion.IdempotencyKey
+                })
+                .IsUnique();
+
+            entity.HasIndex(completion => new
+            {
+                completion.VisitorUserId,
+                completion.CaredAt
+            });
+
+            entity.HasIndex(completion => new
+            {
+                completion.VisitorUserId,
+                completion.OwnerUserId,
+                completion.CaredAt
+            });
+
+            entity.HasOne(completion => completion.VisitorUser)
+                .WithMany()
+                .HasForeignKey(completion => completion.VisitorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(completion => completion.OwnerUser)
+                .WithMany()
+                .HasForeignKey(completion => completion.OwnerUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(completion => completion.VisitorFarmCareCycle)
+                .WithMany(cycle => cycle.Completions)
+                .HasForeignKey(completion =>
+                    completion.VisitorFarmCareCycleId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<VisitorFarmCareCycle>(entity =>
+        {
+            entity.HasIndex(cycle => new
+            {
+                cycle.VisitorUserId,
+                cycle.FarmId,
+                cycle.StartedAt
+            });
+
+            entity.HasIndex(cycle => new
+            {
+                cycle.VisitorUserId,
+                cycle.FarmId,
+                cycle.RewardGranted,
+                cycle.StartedAt
+            }).HasDatabaseName(
+                "IX_CareCycles_Visitor_Farm_Rewarded_StartedAt");
+
+            entity.HasOne(cycle => cycle.VisitorUser)
+                .WithMany()
+                .HasForeignKey(cycle => cycle.VisitorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(cycle => cycle.OwnerUser)
+                .WithMany()
+                .HasForeignKey(cycle => cycle.OwnerUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(cycle => cycle.Farm)
+                .WithMany()
+                .HasForeignKey(cycle => cycle.FarmId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_VisitorFarmCareCycles_DifferentUsers",
+                    "\"VisitorUserId\" <> \"OwnerUserId\"");
+
+                table.HasCheckConstraint(
+                    "CK_VisitorFarmCareCycles_ValidWindow",
+                    "\"EndsAt\" > \"StartedAt\"");
+            });
+        });
+
+        modelBuilder.Entity<Plot>(entity =>
+        {
+            entity.Ignore(p => p.IsReady);
+
+            entity.HasIndex(p => p.CareOpportunityId)
+                .IsUnique();
+        });
 
         modelBuilder.Entity<Seed>()
             .Property(s => s.GrowTime)

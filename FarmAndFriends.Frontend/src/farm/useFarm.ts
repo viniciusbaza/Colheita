@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { authFetch } from '../api/http'
 import { type Farm } from '../types/Farm'
-import { getNextPlotReadyAt } from '../utils/time'
+import { getNextCareAt, getNextPlotReadyAt } from '../utils/time'
 
 const FARM_POLL_INTERVAL_MS = 30_000
-const READY_SYNC_BUFFER_MS = 150
+const FARM_SYNC_BUFFER_MS = 150
 
 type FarmSession = {
   mode: 'OWN' | 'VISITING'
@@ -83,23 +83,31 @@ export function useFarmInternal() {
   }, [fetchFarm])
 
   const nextPlotReadyAt = getNextPlotReadyAt(farm?.plots ?? [])
+  const nextCareAt = isVisiting
+    ? getNextCareAt(farm?.plots ?? [])
+    : null
+  const nextFarmSyncAt = nextCareAt === null
+    ? nextPlotReadyAt
+    : nextPlotReadyAt === null
+      ? nextCareAt
+      : Math.min(nextPlotReadyAt, nextCareAt)
 
   useEffect(() => {
-    if (nextPlotReadyAt === null) return
+    if (nextFarmSyncAt === null) return
 
     const interval = setInterval(() => {
       void fetchFarm()
     }, FARM_POLL_INTERVAL_MS)
 
-    const readyTimeout = setTimeout(() => {
+    const syncTimeout = setTimeout(() => {
       void fetchFarm()
-    }, Math.max(0, nextPlotReadyAt - Date.now()) + READY_SYNC_BUFFER_MS)
+    }, Math.max(0, nextFarmSyncAt - Date.now()) + FARM_SYNC_BUFFER_MS)
 
     return () => {
       clearInterval(interval)
-      clearTimeout(readyTimeout)
+      clearTimeout(syncTimeout)
     }
-  }, [fetchFarm, nextPlotReadyAt])
+  }, [fetchFarm, nextFarmSyncAt])
 
   return { 
     farm, 

@@ -37,9 +37,10 @@ public class ShopController : ControllerBase
         var userId = Guid.Parse(
             User.FindFirstValue(ClaimTypes.NameIdentifier)!
         );
-        // 0️ Buscar usuário
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
+        var user = await _context.LockAsync(userId);
 
         if (user == null)
             return Unauthorized();
@@ -107,6 +108,7 @@ public class ShopController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return Ok(new BuySeedResponse(
             seed.Id,
@@ -126,6 +128,13 @@ public class ShopController : ControllerBase
         var userId = Guid.Parse(
             User.FindFirstValue(ClaimTypes.NameIdentifier)!
         );
+
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
+        var user = await _context.LockAsync(userId);
+
+        if (user == null)
+            return Unauthorized();
 
         // 1️ Inventário
         var inventory = await _context.Inventories
@@ -171,9 +180,10 @@ public class ShopController : ControllerBase
 
         inventory.Coins = (int)updatedCoins;
 
-        await _experienceService.AddXpAsync(userId, 5);
+        _experienceService.AddXp(user, 5);
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return Ok(new
         {

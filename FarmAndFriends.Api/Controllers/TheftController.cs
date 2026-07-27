@@ -37,6 +37,13 @@ public class TheftController : ControllerBase
             User.FindFirstValue(ClaimTypes.NameIdentifier)!
         );
 
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
+        var thief = await _context.LockAsync(thiefUserId);
+
+        if (thief == null)
+            return Unauthorized();
+
         // 1️⃣ Carregar plot + seed + farm
         var plot = await _context.Plots
             .Include(p => p.Farm)
@@ -64,11 +71,6 @@ public class TheftController : ControllerBase
         var seed = await _context.Seeds.FindAsync(plot.SeedId);
         if (seed == null)
             return BadRequest("Seed inválida");
-
-        // 2️⃣ Usuário ladrão
-        var thief = await _context.Users.FindAsync(thiefUserId);
-        if (thief == null)
-            return Unauthorized();
 
         var stolenFromThisPlant = await _context.TheftLogs
             .Where(t =>
@@ -170,13 +172,14 @@ public class TheftController : ControllerBase
         // 9️⃣ Ganho de XP por roubo
         if (result.XpGained > 0)
         {
-            await _experienceService.AddXpAsync(thiefUserId, result.XpGained);
+            _experienceService.AddXp(thief, result.XpGained);
         }
 
         // ⚠️ IMPORTANTE: NÃO limpamos o plot
         // O dono ainda vai colher o restante
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return Ok(new
         {

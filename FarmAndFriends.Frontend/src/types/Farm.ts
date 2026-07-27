@@ -15,6 +15,13 @@ export type PlotStealFailed = {
   reason: string
 }
 
+export type PlotCareDone = {
+  plotId: string
+  coinsGained: number
+  xpGained: number
+  caredByUsername: string
+}
+
 export type PlotHarvestDone = {
   plotId: string
   xpGained: number
@@ -25,6 +32,22 @@ export type StealResponse = {
   stolen: number
   ownerWillReceive: number
   xpGained: number
+}
+
+export type CareResponse = {
+  completionId: string
+  plotId: string
+  careOpportunityId: string
+  caredAt: string
+  nextCareAt: string
+  caredByUserId: string
+  caredByUsername: string
+  coinsGained: number
+  xpGained: number
+  coins: number
+  careCycleId: string
+  careCycleEndsAt: string
+  cycleRewardGranted: boolean
 }
 
 export type PlantResponse = {
@@ -50,6 +73,27 @@ type PlotVisualState =
   | 'ready'
   | 'harvesting'
 
+export type PlotCare = {
+  opportunityId: string
+  status: 'available' | 'cooldown' | 'observed'
+  caredAt: string | null
+  nextCareAt: string | null
+  caredByUserId: string | null
+  caredByUsername: string | null
+  canCare: boolean
+  rewardAvailable: boolean
+  viewerCared: boolean
+  careCycleEndsAt: string | null
+  caregiverCount: number
+  caregivers: PlotCaregiver[]
+}
+
+export type PlotCaregiver = {
+  userId: string
+  username: string
+  caredAt: string
+}
+
 export type Plot = {
   id: string
   x: number
@@ -62,6 +106,7 @@ export type Plot = {
   remainingYield: number
   state: PlotVisualState
   showXp?: number
+  care?: PlotCare | null
 }
 
 export type Farm = {

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getNextPlotReadyAt } from '../src/utils/time.ts'
+import {
+  getNextCareAt,
+  getNextPlotReadyAt,
+} from '../src/utils/time.ts'
 
 test('returns the nearest pending plot deadline', () => {
   const nextReadyAt = getNextPlotReadyAt([
@@ -54,4 +57,73 @@ test('detects a new deadline after planting in an empty farm', () => {
   ])
 
   assert.equal(nextReadyAt, Date.parse(readyAt))
+})
+
+test('returns the nearest server-provided care cooldown deadline', () => {
+  const now = Date.parse('2026-07-20T10:00:00.000Z')
+  const nextCareAt = getNextCareAt([
+    {
+      seedId: 'corn',
+      isReady: false,
+      readyAt: '2026-07-27T10:00:00.000Z',
+      care: {
+        canCare: false,
+        nextCareAt: '2026-07-20T15:00:00.000Z',
+      },
+    },
+    {
+      seedId: 'tomato',
+      isReady: false,
+      readyAt: '2026-07-27T10:00:00.000Z',
+      care: {
+        canCare: false,
+        nextCareAt: '2026-07-20T14:00:00.000Z',
+      },
+    },
+  ], now)
+
+  assert.equal(nextCareAt, Date.parse('2026-07-20T14:00:00.000Z'))
+})
+
+test('does not schedule care already available or after crop maturity', () => {
+  const now = Date.parse('2026-07-20T10:00:00.000Z')
+  const nextCareAt = getNextCareAt([
+    {
+      seedId: 'corn',
+      isReady: false,
+      readyAt: '2026-07-20T16:00:00.000Z',
+      care: {
+        canCare: true,
+        nextCareAt: null,
+      },
+    },
+    {
+      seedId: 'tomato',
+      isReady: false,
+      readyAt: '2026-07-20T14:00:00.000Z',
+      care: {
+        canCare: false,
+        nextCareAt: '2026-07-20T15:00:00.000Z',
+      },
+    },
+  ], now)
+
+  assert.equal(nextCareAt, null)
+})
+
+test('past care deadline never enables care locally', () => {
+  const now = Date.parse('2026-07-20T15:00:00.000Z')
+  const nextCareAt = getNextCareAt([
+    {
+      seedId: 'corn',
+      isReady: false,
+      readyAt: '2026-07-27T10:00:00.000Z',
+      care: {
+        canCare: false,
+        nextCareAt: '2026-07-20T14:59:59.000Z',
+      },
+    },
+  ], now)
+
+  assert.equal(nextCareAt, null)
 })

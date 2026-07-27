@@ -10,6 +10,8 @@ export function getNotificationTitle(notification: SocialNotification) {
       return 'Solicitação recusada'
     case NotificationType.TheftOccurred:
       return 'Roubo na fazenda'
+    case NotificationType.CropCaredFor:
+      return 'Cuidado na plantação'
     default:
       return 'Nova notificação'
   }
@@ -25,6 +27,8 @@ export function getNotificationIcon(notification: SocialNotification) {
       return '👥'
     case NotificationType.TheftOccurred:
       return '🥷'
+    case NotificationType.CropCaredFor:
+      return '💧'
     default:
       return '🔔'
   }
@@ -46,6 +50,8 @@ export function getNotificationMessage(notification: SocialNotification) {
       return `${actor} recusou sua solicitação de amizade.`
     case NotificationType.TheftOccurred:
       return `${actor} roubou um item da sua fazenda.`
+    case NotificationType.CropCaredFor:
+      return `${actor} cuidou de uma plantação na sua fazenda.`
     default:
       return 'Você recebeu uma nova notificação.'
   }

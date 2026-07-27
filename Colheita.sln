@@ -4,6 +4,8 @@ VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FarmAndFriends.Api", "FarmAndFriends.Api\FarmAndFriends.Api.csproj", "{38C9BDC3-44DC-A4B1-8901-C6EA66CA0C83}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FarmAndFriends.Api.Tests", "FarmAndFriends.Api.Tests\FarmAndFriends.Api.Tests.csproj", "{735CFB74-A968-473F-A67A-23FE404EC8BD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -14,6 +16,10 @@ Global
 		{38C9BDC3-44DC-A4B1-8901-C6EA66CA0C83}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{38C9BDC3-44DC-A4B1-8901-C6EA66CA0C83}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{38C9BDC3-44DC-A4B1-8901-C6EA66CA0C83}.Release|Any CPU.Build.0 = Release|Any CPU
+		{735CFB74-A968-473F-A67A-23FE404EC8BD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{735CFB74-A968-473F-A67A-23FE404EC8BD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{735CFB74-A968-473F-A67A-23FE404EC8BD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{735CFB74-A968-473F-A67A-23FE404EC8BD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

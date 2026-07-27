@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using FarmAndFriends.Api.Configuration;
 using FarmAndFriends.Api.Domain.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,6 +21,20 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection("Jwt"));
+builder.Services
+    .AddOptions<CropCareOptions>()
+    .Bind(builder.Configuration.GetSection(CropCareOptions.SectionName))
+    .Validate(options => options.VisitorPlotCareCooldownHours > 0)
+    .Validate(options => options.VisitorFarmRewardCycleHours > 0)
+    .Validate(options =>
+        options.VisitorFarmRewardRollingWindowHours > 0)
+    .Validate(options =>
+        options.MaxRewardedCyclesPerVisitorFarmWindow > 0)
+    .Validate(options =>
+        options.OwnerNotificationDeduplicationWindowHours > 0)
+    .Validate(options => options.CoinsReward > 0)
+    .Validate(options => options.XpReward > 0)
+    .ValidateOnStart();
 
 var jwtSettings = builder.Configuration
     .GetSection("Jwt")
@@ -86,6 +101,9 @@ builder.Services.AddScoped<TheftService>();
 builder.Services.AddScoped<FarmYieldService>();
 // Friendships
 builder.Services.AddScoped<FriendshipService>();
+// Social crop care
+builder.Services.AddScoped<CropCareService>();
+builder.Services.AddSingleton(TimeProvider.System);
 
 // CORS Policy
 builder.Services.AddCors(options =>

@@ -1,33 +1,25 @@
 using FarmAndFriends.Api.Domain.Entities;
 using FarmAndFriends.Api.Domain.Rules;
-using FarmAndFriends.Api.Infrastructure.Data;
-using Microsoft.EntityFrameworkCore;
 
 namespace FarmAndFriends.Api.Domain.Services;
 
 public class ExperienceService
 {
-    private readonly AppDbContext _context;
-
-    public ExperienceService(AppDbContext context)
+    public void AddXp(User lockedUser, int xp)
     {
-        _context = context;
-    }
+        ArgumentNullException.ThrowIfNull(lockedUser);
 
-    public async Task AddXpAsync(Guid userId, int xp)
-    {
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Id == userId);
+        if (xp < 0)
+            throw new ArgumentOutOfRangeException(nameof(xp));
 
-        if (user == null)
-            throw new Exception("Usuário não encontrado");
+        lockedUser.CurrentXp = checked(lockedUser.CurrentXp + xp);
 
-        user.CurrentXp += xp;
-
-        while (user.CurrentXp >= LevelProgression.XpToNextLevel(user.Level))
+        while (lockedUser.CurrentXp >=
+               LevelProgression.XpToNextLevel(lockedUser.Level))
         {
-            user.CurrentXp -= LevelProgression.XpToNextLevel(user.Level);
-            user.Level++;
+            lockedUser.CurrentXp -=
+                LevelProgression.XpToNextLevel(lockedUser.Level);
+            lockedUser.Level++;
         }
-    }   
+    }
 }

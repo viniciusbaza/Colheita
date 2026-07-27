@@ -49,6 +49,7 @@ public class NotificationsController : ControllerBase
             n.Message,
             n.FriendshipId,
             n.TheftLogId,
+            n.CareOpportunityId,
             n.CreatedAt,
             n.ReadAt)));
     }

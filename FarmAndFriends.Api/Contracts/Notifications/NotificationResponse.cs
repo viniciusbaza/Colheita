@@ -10,6 +10,7 @@ public record NotificationResponse(
     string? Message,
     Guid? FriendshipId,
     Guid? TheftLogId,
+    Guid? CareOpportunityId,
     DateTime CreatedAt,
     DateTime? ReadAt
 );

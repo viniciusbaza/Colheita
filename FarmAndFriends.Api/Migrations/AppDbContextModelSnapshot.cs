@@ -22,6 +22,69 @@ namespace FarmAndFriends.Api.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.CropCareCompletion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CareOpportunityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CaredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CaredByUsername")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("CoinsAfter")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CoinsGained")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("FarmId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("IdempotencyKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlotId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VisitorFarmCareCycleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("VisitorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("XpGained")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("CareOpportunityId", "CaredAt");
+
+                    b.HasIndex("VisitorFarmCareCycleId", "CareOpportunityId");
+
+                    b.HasIndex("VisitorUserId", "CaredAt");
+
+                    b.HasIndex("VisitorUserId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("VisitorUserId", "CareOpportunityId", "CaredAt");
+
+                    b.HasIndex("VisitorUserId", "OwnerUserId", "CaredAt");
+
+                    b.ToTable("CropCareCompletions");
+                });
+
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Farm", b =>
                 {
                     b.Property<Guid>("Id")
@@ -142,6 +205,9 @@ namespace FarmAndFriends.Api.Migrations
                     b.Property<Guid?>("ActorUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("CareOpportunityId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -167,12 +233,19 @@ namespace FarmAndFriends.Api.Migrations
 
                     b.HasIndex("ActorUserId");
 
+                    b.HasIndex("CareOpportunityId")
+                        .IsUnique();
+
                     b.HasIndex("FriendshipId");
 
                     b.HasIndex("TheftLogId")
                         .IsUnique();
 
                     b.HasIndex("RecipientUserId", "ReadAt", "CreatedAt");
+
+                    b.HasIndex("Type", "ActorUserId", "CreatedAt");
+
+                    b.HasIndex("Type", "ActorUserId", "RecipientUserId", "CreatedAt");
 
                     b.ToTable("Notifications");
                 });
@@ -181,6 +254,9 @@ namespace FarmAndFriends.Api.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CareOpportunityId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("FarmId")
@@ -208,6 +284,9 @@ namespace FarmAndFriends.Api.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CareOpportunityId")
+                        .IsUnique();
 
                     b.HasIndex("FarmId");
 
@@ -371,6 +450,55 @@ namespace FarmAndFriends.Api.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.VisitorFarmCareCycle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CoinsReward")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("EndsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FarmId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("RewardGranted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("VisitorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("XpReward")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FarmId");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("VisitorUserId", "FarmId", "StartedAt");
+
+                    b.HasIndex("VisitorUserId", "FarmId", "RewardGranted", "StartedAt")
+                        .HasDatabaseName("IX_CareCycles_Visitor_Farm_Rewarded_StartedAt");
+
+                    b.ToTable("VisitorFarmCareCycles", t =>
+                        {
+                            t.HasCheckConstraint("CK_VisitorFarmCareCycles_DifferentUsers", "\"VisitorUserId\" <> \"OwnerUserId\"");
+
+                            t.HasCheckConstraint("CK_VisitorFarmCareCycles_ValidWindow", "\"EndsAt\" > \"StartedAt\"");
+                        });
+                });
+
             modelBuilder.Entity("TheftLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -410,6 +538,33 @@ namespace FarmAndFriends.Api.Migrations
                     b.HasIndex("FarmId", "ThiefUserId", "CreatedAt");
 
                     b.ToTable("TheftLogs");
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.CropCareCompletion", b =>
+                {
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.VisitorFarmCareCycle", "VisitorFarmCareCycle")
+                        .WithMany("Completions")
+                        .HasForeignKey("VisitorFarmCareCycleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.User", "VisitorUser")
+                        .WithMany()
+                        .HasForeignKey("VisitorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("OwnerUser");
+
+                    b.Navigation("VisitorFarmCareCycle");
+
+                    b.Navigation("VisitorUser");
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Farm", b =>
@@ -526,6 +681,33 @@ namespace FarmAndFriends.Api.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.VisitorFarmCareCycle", b =>
+                {
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.Farm", "Farm")
+                        .WithMany()
+                        .HasForeignKey("FarmId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.User", "VisitorUser")
+                        .WithMany()
+                        .HasForeignKey("VisitorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Farm");
+
+                    b.Navigation("OwnerUser");
+
+                    b.Navigation("VisitorUser");
+                });
+
             modelBuilder.Entity("TheftLog", b =>
                 {
                     b.HasOne("FarmAndFriends.Api.Domain.Entities.Farm", "Farm")
@@ -576,6 +758,11 @@ namespace FarmAndFriends.Api.Migrations
                     b.Navigation("Farms");
 
                     b.Navigation("RefreshTokens");
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.VisitorFarmCareCycle", b =>
+                {
+                    b.Navigation("Completions");
                 });
 #pragma warning restore 612, 618
         }

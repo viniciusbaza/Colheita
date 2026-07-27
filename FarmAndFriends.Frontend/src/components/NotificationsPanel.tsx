@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useFarm } from '../farm/useFarmContext'
 import { useSocial } from '../social/useSocial'
-import type { SocialNotification } from '../types/Social'
+import {
+  NotificationType,
+  type SocialNotification,
+} from '../types/Social'
 import {
   getNotificationIcon,
   getNotificationMessage,
@@ -25,7 +29,9 @@ function getErrorMessage(error: unknown) {
 }
 
 export function NotificationsPanel({ onClose }: NotificationsPanelProps) {
+  const { visitFarm } = useFarm()
   const {
+    friends,
     notifications,
     unreadCount,
     loading,
@@ -140,6 +146,9 @@ export function NotificationsPanel({ onClose }: NotificationsPanelProps) {
               {notifications.map(notification => {
                 const isUnread = notification.readAt == null
                 const isBusy = busyNotificationId === notification.id
+                const careFriend = notification.type === NotificationType.CropCaredFor
+                  ? friends.find(friend => friend.userId === notification.actorUserId)
+                  : undefined
 
                 return (
                   <article
@@ -180,16 +189,37 @@ export function NotificationsPanel({ onClose }: NotificationsPanelProps) {
                         >
                           {formatNotificationDate(notification.createdAt)}
                         </time>
-                        {isUnread && (
-                          <button
-                            type="button"
-                            onClick={() => void markAsRead(notification)}
-                            disabled={isBusy}
-                            className="rounded-lg px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
-                          >
-                            {isBusy ? 'Atualizando...' : 'Marcar como lida'}
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {careFriend && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isUnread) {
+                                  void markAsRead(notification)
+                                }
+                                visitFarm(
+                                  careFriend.farmId,
+                                  careFriend.userId,
+                                  careFriend.username,
+                                )
+                                onClose()
+                              }}
+                              className="rounded-lg bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-200"
+                            >
+                              Visitar {careFriend.username}
+                            </button>
+                          )}
+                          {isUnread && (
+                            <button
+                              type="button"
+                              onClick={() => void markAsRead(notification)}
+                              disabled={isBusy}
+                              className="rounded-lg px-2 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                            >
+                              {isBusy ? 'Atualizando...' : 'Marcar como lida'}
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </article>

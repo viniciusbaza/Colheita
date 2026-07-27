@@ -29,12 +29,13 @@ import readyTomatoImage from '../assets/tiles/ready/tomato.png'
 import type {
   Farm,
   Plot,
+  PlotCareDone,
   PlotHarvestDone,
   PlotPlantDone,
   PlotStealDone,
 } from '../../types/Farm'
 
-type XpSource = 'HARVEST' | 'PLANT' | 'STEAL'
+type XpSource = 'HARVEST' | 'PLANT' | 'STEAL' | 'CARE'
 
 const GROWTH_STAGE_2_THRESHOLD = 0.5
 const PLOT_SCALE = 0.11
@@ -201,9 +202,11 @@ export default class FarmScene extends Phaser.Scene {
 
     // Evento de roubo
     window.addEventListener('plot:steal:done', this.onStealDone)
+    window.addEventListener('plot:care:done', this.onCareDone)
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('plot:steal:done', this.onStealDone)
+      window.removeEventListener('plot:care:done', this.onCareDone)
       this.scale.off(Phaser.Scale.Events.RESIZE, this.onResize)
       window.removeEventListener(
         FARM_CAMERA_MODE_EVENT,
@@ -625,6 +628,8 @@ export default class FarmScene extends Phaser.Scene {
       }
     }
 
+    this.syncCareBadge(tile, plot, false)
+
     // Abre somente em tap/click. Um arrasto iniciado sobre o plot move a
     // câmera sem abrir o modal acidentalmente.
     ground.on('pointerup', () => {
@@ -777,6 +782,86 @@ export default class FarmScene extends Phaser.Scene {
     })
   }
 
+  private syncCareBadge(
+    tile: Phaser.GameObjects.Image,
+    plot: Plot,
+    animate = true,
+  ) {
+    const nextStatus = plot.care?.canCare ? 'available' : null
+    const currentStatus = tile.getData('careBadgeStatus') as
+      | 'available'
+      | null
+
+    if (currentStatus === nextStatus) return
+
+    this.removeCareBadge(tile)
+
+    if (nextStatus === 'available') {
+      this.addAvailableCareBadge(tile, animate)
+    }
+  }
+
+  private addAvailableCareBadge(
+    tile: Phaser.GameObjects.Image,
+    animate = true,
+  ) {
+    const badge = this.add.container(
+      tile.x - 17,
+      tile.y - tile.displayHeight * 0.72,
+    )
+    const shadow = this.add.circle(1, 2, 7, 0x082f49, 0.2)
+    const background = this.add.circle(0, 0, 6.5, 0xe0f2fe, 0.96)
+      .setStrokeStyle(1, 0x38bdf8, 1)
+    const drop = this.add.graphics()
+    drop.fillStyle(0x0ea5e9, 1)
+    drop.fillTriangle(0, -4.5, -3, 1, 3, 1)
+    drop.fillCircle(0, 1.5, 3)
+    drop.fillStyle(0xffffff, 0.65)
+    drop.fillCircle(-1.1, 0, 0.8)
+
+    badge
+      .add([shadow, background, drop])
+      .setDepth(DEPTH.BADGES + tile.depth)
+      .setScale(animate && !this.reduceMotion ? 0 : 1)
+
+    tile.setData('careBadge', badge)
+    tile.setData('careBadgeStatus', 'available')
+
+    if (animate && !this.reduceMotion) {
+      this.tweens.add({
+        targets: badge,
+        scale: 1,
+        duration: 220,
+        ease: 'Back.out',
+      })
+    }
+
+    if (!this.reduceMotion) {
+      this.tweens.add({
+        targets: badge,
+        y: badge.y - 3,
+        duration: 1_100,
+        ease: 'Sine.easeInOut',
+        yoyo: true,
+        repeat: -1,
+      })
+    }
+  }
+
+  private removeCareBadge(tile: Phaser.GameObjects.Image) {
+    const badge = tile.getData('careBadge') as
+      | Phaser.GameObjects.Container
+      | undefined
+
+    if (badge) {
+      this.tweens.killTweensOf(badge)
+      badge.destroy(true)
+    }
+
+    tile.setData('careBadge', null)
+    tile.setData('careBadgeStatus', null)
+  }
+
   private getPlotTexture(plot: Plot) {
 
     if (!plot.unlocked) return 'plot-locked'
@@ -847,6 +932,8 @@ export default class FarmScene extends Phaser.Scene {
         tile.setTexture(newTexture)
       }
 
+      this.syncCareBadge(tile, plot)
+
       // 🌟 ready → adiciona efeitos
       if (plot.seedId && plot.isReady) {
         if (!tile.getData('glow')) {
@@ -898,6 +985,7 @@ export default class FarmScene extends Phaser.Scene {
     tile.setData('glow', null)
     this.tweens.killTweensOf(tile)
     this.removeRemainingYieldBadge(tile)
+    this.removeCareBadge(tile)
 
     // 🌱 Volta ao estado de plot vazio
     tile.setScale(PLOT_SCALE)
@@ -920,6 +1008,108 @@ export default class FarmScene extends Phaser.Scene {
     // 🔄 Atualiza textura para plot vazio após animação
     tile.setTexture('plot')
     tile.setAlpha(1)
+  }
+
+  private onCareDone = (e: Event) => {
+    const {
+      plotId,
+      coinsGained,
+      xpGained,
+    } = (e as CustomEvent<PlotCareDone>).detail
+
+    const tile = this.plotTiles.get(plotId)
+    if (!tile) return
+
+    this.time.delayedCall(0, () => {
+      this.removeCareBadge(tile)
+      this.animatePlotCare(tile)
+
+      const rewardX = tile.x
+      const rewardY = tile.y - tile.displayHeight * 0.9
+      const xpDelay = coinsGained > 0
+        ? this.spawnCareReward(rewardX, rewardY, coinsGained)
+        : 0
+
+      if (xpGained > 0) {
+        this.time.delayedCall(xpDelay, () => {
+          this.spawnXp(rewardX, rewardY, xpGained, 'CARE')
+        })
+      }
+    })
+  }
+
+  private animatePlotCare(tile: Phaser.GameObjects.Image) {
+    tile.setTint(0x93c5fd)
+
+    this.time.delayedCall(this.reduceMotion ? 120 : 480, () => {
+      if (tile.scene) tile.clearTint()
+    })
+
+    if (this.reduceMotion) return
+
+    for (let index = 0; index < 4; index += 1) {
+      const drop = this.add.circle(
+        tile.x - 12 + index * 8,
+        tile.y - tile.displayHeight - 16 - (index % 2) * 6,
+        2.5,
+        0x38bdf8,
+        0.9,
+      ).setDepth(DEPTH.FEEDBACK)
+
+      this.tweens.add({
+        targets: drop,
+        y: tile.y - tile.displayHeight * 0.25,
+        alpha: 0,
+        scale: 0.6,
+        delay: index * 55,
+        duration: 360,
+        ease: 'Quad.easeIn',
+        onComplete: () => drop.destroy(),
+      })
+    }
+
+    this.tweens.add({
+      targets: tile,
+      scale: tile.scale * 1.025,
+      duration: 180,
+      ease: 'Sine.easeInOut',
+      yoyo: true,
+    })
+  }
+
+  private spawnCareReward(
+    x: number,
+    y: number,
+    coinsGained: number,
+  ) {
+    const duration = this.reduceMotion ? 500 : 900
+    const text = this.add.text(
+      x,
+      y,
+      `+${coinsGained} 🪙`,
+      {
+        fontFamily: 'Arial, sans-serif',
+        fontSize: '14px',
+        fontStyle: 'bold',
+        color: '#e0f2fe',
+        stroke: '#075985',
+        strokeThickness: 3,
+      },
+    )
+      .setOrigin(0.5)
+      .setDepth(DEPTH.FEEDBACK)
+
+    this.tweens.add({
+      targets: text,
+      y: y - 28,
+      alpha: 0,
+      scale: 1.1,
+      duration,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    })
+
+    return duration
   }
 
   private onStealDone = async (e: Event) => {
@@ -985,6 +1175,11 @@ export default class FarmScene extends Phaser.Scene {
         color: '#FF9C6E',
         stroke: '#7A2E1B',
         scale: 1.3,
+      },
+      CARE: {
+        color: '#E0F2FE',
+        stroke: '#075985',
+        scale: 1.2,
       },
     }
 

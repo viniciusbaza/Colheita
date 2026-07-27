@@ -22,6 +22,13 @@ type PlotReadySchedule = {
   readyAt?: string | null
 }
 
+type PlotCareSchedule = PlotReadySchedule & {
+  care?: {
+    canCare: boolean
+    nextCareAt?: string | null
+  } | null
+}
+
 export function getNextPlotReadyAt(
   plots: readonly PlotReadySchedule[],
 ): number | null {
@@ -39,6 +46,44 @@ export function getNextPlotReadyAt(
   }
 
   return nextReadyAt
+}
+
+export function getNextCareAt(
+  plots: readonly PlotCareSchedule[],
+  now = Date.now(),
+): number | null {
+  let nextCareAt: number | null = null
+
+  for (const plot of plots) {
+    if (
+      !plot.seedId
+      || plot.isReady
+      || !plot.care
+      || plot.care.canCare
+      || !plot.care.nextCareAt
+    ) {
+      continue
+    }
+
+    const careAt = new Date(plot.care.nextCareAt).getTime()
+    const readyAt = plot.readyAt
+      ? new Date(plot.readyAt).getTime()
+      : Number.NaN
+
+    if (
+      !Number.isFinite(careAt)
+      || careAt <= now
+      || (Number.isFinite(readyAt) && careAt >= readyAt)
+    ) {
+      continue
+    }
+
+    nextCareAt = nextCareAt === null
+      ? careAt
+      : Math.min(nextCareAt, careAt)
+  }
+
+  return nextCareAt
 }
 
 export function parseTimeSpanToSeconds(time: string) {

@@ -13,6 +13,7 @@ export const NotificationType = {
   FriendRequestAccepted: 1,
   FriendRequestDeclined: 2,
   TheftOccurred: 3,
+  CropCaredFor: 4,
 } as const
 
 export type NotificationType =
@@ -42,6 +43,7 @@ export type SocialNotification = {
   message: string | null
   friendshipId: string | null
   theftLogId: string | null
+  careOpportunityId: string | null
   createdAt: string
   readAt: string | null
 }
