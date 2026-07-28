@@ -787,7 +787,7 @@ export default class FarmScene extends Phaser.Scene {
     plot: Plot,
     animate = true,
   ) {
-    const nextStatus = plot.care?.canCare ? 'available' : null
+    const nextStatus = plot.care?.canCare && plot.care?.rewardAvailable === true ? 'available' : null
     const currentStatus = tile.getData('careBadgeStatus') as
       | 'available'
       | null

@@ -283,7 +283,14 @@ export function PlotModal({ plotId, onClose }: Props) {
             && !canCareNow
             && careTimeLeft && (
             <p className="mt-1 text-xs font-semibold text-sky-700">
-              💧 Você regou recentemente. Regue novamente em {careTimeLeft}.
+              💧 Regue novamente em {careTimeLeft}.
+            </p>
+          )}
+          {isVisiting
+            && canCareNow
+            && plot.care?.rewardAvailable === false && (
+            <p className="mt-1 max-w-52 text-[11px] leading-snug text-amber-700">
+              💧 Você regou recentemente.
             </p>
           )}
           <div className="plot-actions">
@@ -303,7 +310,7 @@ export function PlotModal({ plotId, onClose }: Props) {
               )
             ) : (
               <>
-                {isVisiting && canCareNow && (
+                {isVisiting && canCareNow && plot.care?.rewardAvailable === true && (
                   <button
                     type="button"
                     className="plot-action care"
@@ -319,13 +326,6 @@ export function PlotModal({ plotId, onClose }: Props) {
               </>
             )}
           </div>
-          {isVisiting
-            && canCareNow
-            && plot.care?.rewardAvailable === false && (
-              <p className="mt-1 max-w-52 text-[11px] leading-snug text-amber-700">
-                Seu limite de recompensas nesse lote foi atingido.
-              </p>
-            )}
         </>
       )}
 

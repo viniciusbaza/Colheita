@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FarmAndFriends.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260727034257_InitialCreate")]
+    [Migration("20260728002103_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
