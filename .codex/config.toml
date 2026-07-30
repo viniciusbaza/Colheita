@@ -1,3 +1,12 @@
 [agents]
 enabled = true
+# Limita a quantidade de agentes secundários trabalhando ao mesmo tempo.
+# Quatro é suficiente para o Farm & Friends sem criar coordenação excessiva.
 max_concurrent_threads_per_session = 4
+
+# Mantém no contexto principal a informação de que um agente foi interrompido.
+interrupt_message = true
+
+# Não fixamos um modelo global nesta primeira versão.
+# Cada agente herda a configuração da sessão principal quando não possui override.
+default_subagent_reasoning_effort = "medium"
