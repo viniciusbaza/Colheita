@@ -36,6 +36,7 @@ export function PlotModal({ plotId, onClose }: Props) {
   const farmId = farm?.id
   const care = plot?.care
   const nextCareAt = care?.nextCareAt
+  const careCycleEndsAt = care?.careCycleEndsAt
   const canCareNow = Boolean(care?.canCare)
   const careOpportunityId = canCareNow
     ? care?.opportunityId ?? null
@@ -53,14 +54,21 @@ export function PlotModal({ plotId, onClose }: Props) {
     && nextCareAtTime > currentTime
     ? formatTimeRemaining(nextCareAt!, currentTime)
     : null
+  const careCycleEndsAtTime = careCycleEndsAt
+    ? new Date(careCycleEndsAt).getTime()
+    : Number.NaN
+  const careCycleTimeLeft = Number.isFinite(careCycleEndsAtTime)
+    && careCycleEndsAtTime > currentTime
+    ? formatTimeRemaining(careCycleEndsAt!, currentTime)
+    : null
 
   useEffect(() => {
-    if (!readyAt) return
+    if (!readyAt && !nextCareAt && !careCycleEndsAt) return
 
     const interval = setInterval(() => setCurrentTime(Date.now()), 1000)
 
     return () => clearInterval(interval)
-  }, [readyAt])
+  }, [careCycleEndsAt, nextCareAt, readyAt])
 
   if (!plot) return null
 
@@ -288,9 +296,10 @@ export function PlotModal({ plotId, onClose }: Props) {
           )}
           {isVisiting
             && canCareNow
-            && plot.care?.rewardAvailable === false && (
+            && plot.care?.rewardAvailable === false
+            && careCycleTimeLeft && (
             <p className="mt-1 max-w-52 text-[11px] leading-snug text-amber-700">
-              💧 Você regou recentemente.
+              💧 Você regou recentemente. Regue novamente em {careCycleTimeLeft}.
             </p>
           )}
           <div className="plot-actions">

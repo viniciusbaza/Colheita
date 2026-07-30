@@ -68,6 +68,7 @@ test('returns the nearest server-provided care cooldown deadline', () => {
       readyAt: '2026-07-27T10:00:00.000Z',
       care: {
         canCare: false,
+        rewardAvailable: false,
         nextCareAt: '2026-07-20T15:00:00.000Z',
       },
     },
@@ -77,7 +78,57 @@ test('returns the nearest server-provided care cooldown deadline', () => {
       readyAt: '2026-07-27T10:00:00.000Z',
       care: {
         canCare: false,
+        rewardAvailable: false,
         nextCareAt: '2026-07-20T14:00:00.000Z',
+      },
+    },
+  ], now)
+
+  assert.equal(nextCareAt, Date.parse('2026-07-20T14:00:00.000Z'))
+})
+
+test('schedules the end of a care cycle that currently has no reward', () => {
+  const now = Date.parse('2026-07-20T10:00:00.000Z')
+  const nextCareAt = getNextCareAt([
+    {
+      seedId: 'corn',
+      isReady: false,
+      readyAt: '2026-07-27T10:00:00.000Z',
+      care: {
+        canCare: true,
+        rewardAvailable: false,
+        nextCareAt: null,
+        careCycleEndsAt: '2026-07-20T12:00:00.000Z',
+      },
+    },
+  ], now)
+
+  assert.equal(nextCareAt, Date.parse('2026-07-20T12:00:00.000Z'))
+})
+
+test('returns the nearest cooldown or care-cycle deadline', () => {
+  const now = Date.parse('2026-07-20T10:00:00.000Z')
+  const nextCareAt = getNextCareAt([
+    {
+      seedId: 'corn',
+      isReady: false,
+      readyAt: '2026-07-27T10:00:00.000Z',
+      care: {
+        canCare: false,
+        rewardAvailable: false,
+        nextCareAt: '2026-07-20T15:00:00.000Z',
+        careCycleEndsAt: null,
+      },
+    },
+    {
+      seedId: 'tomato',
+      isReady: false,
+      readyAt: '2026-07-27T10:00:00.000Z',
+      care: {
+        canCare: true,
+        rewardAvailable: false,
+        nextCareAt: null,
+        careCycleEndsAt: '2026-07-20T14:00:00.000Z',
       },
     },
   ], now)
@@ -94,6 +145,7 @@ test('does not schedule care already available or after crop maturity', () => {
       readyAt: '2026-07-20T16:00:00.000Z',
       care: {
         canCare: true,
+        rewardAvailable: true,
         nextCareAt: null,
       },
     },
@@ -103,7 +155,18 @@ test('does not schedule care already available or after crop maturity', () => {
       readyAt: '2026-07-20T14:00:00.000Z',
       care: {
         canCare: false,
+        rewardAvailable: false,
         nextCareAt: '2026-07-20T15:00:00.000Z',
+      },
+    },
+    {
+      seedId: 'carrot',
+      isReady: false,
+      readyAt: '2026-07-20T14:00:00.000Z',
+      care: {
+        canCare: true,
+        rewardAvailable: false,
+        careCycleEndsAt: '2026-07-20T15:00:00.000Z',
       },
     },
   ], now)
@@ -111,7 +174,7 @@ test('does not schedule care already available or after crop maturity', () => {
   assert.equal(nextCareAt, null)
 })
 
-test('past care deadline never enables care locally', () => {
+test('past care deadlines never enable care locally', () => {
   const now = Date.parse('2026-07-20T15:00:00.000Z')
   const nextCareAt = getNextCareAt([
     {
@@ -120,7 +183,18 @@ test('past care deadline never enables care locally', () => {
       readyAt: '2026-07-27T10:00:00.000Z',
       care: {
         canCare: false,
+        rewardAvailable: false,
         nextCareAt: '2026-07-20T14:59:59.000Z',
+      },
+    },
+    {
+      seedId: 'tomato',
+      isReady: false,
+      readyAt: '2026-07-27T10:00:00.000Z',
+      care: {
+        canCare: true,
+        rewardAvailable: false,
+        careCycleEndsAt: '2026-07-20T14:59:59.000Z',
       },
     },
   ], now)

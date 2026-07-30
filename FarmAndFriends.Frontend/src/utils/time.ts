@@ -25,7 +25,9 @@ type PlotReadySchedule = {
 type PlotCareSchedule = PlotReadySchedule & {
   care?: {
     canCare: boolean
+    rewardAvailable: boolean
     nextCareAt?: string | null
+    careCycleEndsAt?: string | null
   } | null
 }
 
@@ -59,13 +61,19 @@ export function getNextCareAt(
       !plot.seedId
       || plot.isReady
       || !plot.care
-      || plot.care.canCare
-      || !plot.care.nextCareAt
     ) {
       continue
     }
 
-    const careAt = new Date(plot.care.nextCareAt).getTime()
+    const careDeadline = plot.care.canCare
+      ? plot.care.rewardAvailable
+        ? null
+        : plot.care.careCycleEndsAt
+      : plot.care.nextCareAt
+
+    if (!careDeadline) continue
+
+    const careAt = new Date(careDeadline).getTime()
     const readyAt = plot.readyAt
       ? new Date(plot.readyAt).getTime()
       : Number.NaN
