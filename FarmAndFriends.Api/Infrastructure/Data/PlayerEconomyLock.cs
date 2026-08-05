@@ -27,4 +27,48 @@ public static class PlayerEconomyLock
                 """)
             .SingleOrDefaultAsync(cancellationToken);
     }
+
+    public static async Task<Farm?> LockFarmAsync(
+        this AppDbContext context,
+        Guid farmId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureTransaction(context);
+
+        return await context.Farms
+            .FromSqlInterpolated(
+                $"""
+                SELECT * FROM "Farms"
+                WHERE "Id" = {farmId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    public static async Task<List<Plot>> LockFarmPlotsAsync(
+        this AppDbContext context,
+        Guid farmId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureTransaction(context);
+
+        return await context.Plots
+            .FromSqlInterpolated(
+                $"""
+                SELECT * FROM "Plots"
+                WHERE "FarmId" = {farmId}
+                ORDER BY "Id"
+                FOR UPDATE
+                """)
+            .ToListAsync(cancellationToken);
+    }
+
+    private static void EnsureTransaction(AppDbContext context)
+    {
+        if (context.Database.CurrentTransaction == null)
+        {
+            throw new InvalidOperationException(
+                "The farm lock requires an explicit transaction.");
+        }
+    }
 }

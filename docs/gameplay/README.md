@@ -90,11 +90,33 @@ Crops may currently be sold in the shop.
 
 The amount of crop still available in a ready plot.
 
-RemainingYield decreases when theft occurs.
+RemainingYield decreases when theft or an unresolved pest consumes production.
 
-RemainingYield must never become negative.
+RemainingYield is authoritative while a crop is planted. It is initialized on
+planting, awarded on harvest and cleared when the plot becomes empty.
+
+Theft and pest damage must never reduce RemainingYield below one unit.
 
 The owner must retain a meaningful harvest after theft.
+
+### Pest infestation
+
+A server-controlled threat that may affect a ready, unprotected crop after its
+safety period.
+
+The MVP pest is a caterpillar. One planted crop may receive at most one
+infestation, and an infestation can consume at most one unit. A successful
+manual removal is a distinct helping action: the actor may receive a small,
+server-confirmed XP and standard-currency reward, regardless of whether the
+plot belongs to the actor or to an accepted friend.
+
+### Pest protection
+
+A time-limited property of one plot. Protection prevents new infestations and
+cancels a scheduled or active infestation, but it does not prevent theft.
+
+Protection remains attached to the plot after harvesting and replanting until
+its server-provided expiration time.
 
 ### Plot care
 
@@ -333,12 +355,110 @@ The visitor should experience:
 * motivation to visit farms;
 * limits that prevent theft from replacing farming.
 
+## Pests
+
+The caterpillar is a light alternative threat on ready crops. Its MVP cycle is:
+
+```text
+Ready crop
+→ configured safety period
+→ Scheduled
+→ Active
+→ configured reaction window
+→ Removed, cancelled or Consumed
+```
+
+The development prototype currently uses a 1-minute safety period and a
+5-minute reaction window. These remain centralized backend configuration, not
+client rules.
+
+~~The base runtime configuration keeps the prototype disabled. Development
+enables it explicitly; target environments must opt in only after the
+migration and acceptance checks~~. Disabling it prevents new timed damage and
+repellent spending while still allowing a player to remove an already-active
+caterpillar without receiving a reward.
+
+A crop is eligible only when:
+
+* it is ready;
+* its safety period has ended;
+* its total production is greater than one;
+* its current RemainingYield is greater than one;
+* its plot is not protected;
+* the current planting cycle has not already received an infestation.
+
+The backend processes elapsed deadlines when the farm is loaded or when a
+relevant plot action occurs. The client may display countdowns, but it never
+activates a caterpillar or applies damage.
+
+An active caterpillar:
+
+* is visible to the owner and accepted-friend visitors;
+* may be removed by the owner or an accepted friend;
+* grants the actor 2 standard coins and 5 XP while a reward slot is available;
+* consumes exactly one unit if its reaction deadline expires;
+* never consumes the owner's final unit;
+* generates an owner notification when consumption occurs.
+
+The reward limit is global per actor: the first 15 rewarded removals inside a
+rolling 24-hour window pay, combining the actor's own farm and every visited
+farm. Further removals remain available and still save the crop, but grant
+zero resources until a slot becomes available again. Only the manual
+`Active -> Removed` transition is eligible; harvest, theft, protection,
+consumption and other cancellation paths never grant this reward.
+
+Every successful manual removal is recorded durably and tied to one pest
+occurrence. This makes retries idempotent, prevents concurrent duplicate
+rewards and leaves an audit trail even when the planting cycle later resets.
+The removal request names the occurrence the player actually saw, so a delayed
+request cannot affect a later caterpillar on the same plot.
+The browser only displays `coinsGained`, `xpGained` and `rewardGranted` values
+confirmed by the backend. A new completion closes the plot modal before the
+world displays its coin and XP feedback. An idempotent replay synchronizes
+balances without replaying that celebration.
+
+Harvesting processes an already elapsed consumption first, cancels any
+remaining scheduled or active infestation and awards the resulting
+RemainingYield.
+
+A successful theft follows this precedence:
+
+* `Scheduled` remains scheduled;
+* `Active` becomes `CancelledByTheft`;
+* a scheduled infestation whose yield later reaches one resolves without pest
+  damage when activation is attempted.
+
+Therefore, a theft earlier in the crop cycle does not make the crop permanently
+immune to pests, but a theft while the caterpillar is active prevents that
+infestation from also consuming production.
+
+The farm may have multiple active caterpillars, subject to the configured
+farm-wide active limit and minimum interval between appearances. No pest
+information is exposed in the friends list; it is discovered inside the farm.
+
+### Repelente Natural
+
+`natural_repellent` is a standard-currency consumable stored as an inventory
+item. It may be applied to an unlocked empty, growing or ready plot.
+
+Applying it:
+
+* consumes one item from the authenticated actor, including a visiting friend;
+* sets the plot's protection expiration atomically;
+* cancels a scheduled or active infestation;
+* does not affect theft permission;
+* is rejected without consuming an item while protection is already valid.
+
+The current catalog price is 30 standard coins and the current protection
+duration is four hours. Both values come from backend configuration.
+
 ## Inventory
 
 The inventory currently contains:
 
 * seeds;
 * crops;
+* generic consumable items;
 * standard currency;
 * premium currency.
 
@@ -351,11 +471,12 @@ All inventory changes are confirmed by the backend.
 The shop currently supports:
 
 * buying seeds with standard currency;
+* buying configured consumable items with standard currency;
 * selling crops for standard currency.
 
 A purchase requires:
 
-* a valid seed;
+* a valid seed or catalog item;
 * a valid quantity;
 * sufficient currency;
 * eligibility for any applicable level restriction.
@@ -457,7 +578,9 @@ The game currently includes:
 * farm visits;
 * crop theft;
 * RemainingYield;
-* plot care.
+* plot care;
+* caterpillar infestations;
+* timed plot protection and Repelente Natural.
 
 These systems must be preserved unless an approved feature explicitly changes
 them.
@@ -508,6 +631,9 @@ Each question should eventually become:
 Current questions:
 
 * What limits will apply to repeated theft?
-* How will pests affect ready crops?
+* Should the accelerated development safety and reaction windows return to
+  15 minutes after prototype telemetry?
+* Should infestation frequency become probabilistic after the deterministic
+  prototype?
 * How much protection should new players receive?
 * What farm progression becomes visually available at each level?

@@ -1673,7 +1673,10 @@ public sealed class CropCareConcurrencyTests
         AppDbContext context,
         Guid userId)
     {
-        return new ShopController(context, new ExperienceService())
+        return new ShopController(
+            context,
+            new ExperienceService(),
+            Options.Create(new PestOptions()))
         {
             ControllerContext = new ControllerContext
             {

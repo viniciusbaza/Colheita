@@ -23,6 +23,8 @@ public class AppDbContext : DbContext
         Set<CropCareCompletion>();
     public DbSet<VisitorFarmCareCycle> VisitorFarmCareCycles =>
         Set<VisitorFarmCareCycle>();
+    public DbSet<PestRemovalCompletion> PestRemovalCompletions =>
+        Set<PestRemovalCompletion>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -92,6 +94,7 @@ public class AppDbContext : DbContext
                 .IsUnique();
             entity.HasIndex(n => n.CareOpportunityId)
                 .IsUnique();
+            entity.HasIndex(n => new { n.PestPlotId, n.CreatedAt });
 
             entity.HasOne(n => n.RecipientUser)
                 .WithMany()
@@ -217,12 +220,72 @@ public class AppDbContext : DbContext
             });
         });
 
+        modelBuilder.Entity<PestRemovalCompletion>(entity =>
+        {
+            entity.HasIndex(completion => completion.PestOccurrenceId)
+                .IsUnique();
+
+            entity.HasIndex(completion => new
+                {
+                    completion.ActorUserId,
+                    completion.IdempotencyKey
+                })
+                .IsUnique();
+
+            entity.HasIndex(completion => new
+                {
+                    completion.ActorUserId,
+                    completion.RemovedAt
+                });
+
+            entity.HasOne(completion => completion.ActorUser)
+                .WithMany()
+                .HasForeignKey(completion => completion.ActorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(completion => completion.OwnerUser)
+                .WithMany()
+                .HasForeignKey(completion => completion.OwnerUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_PestRemovalCompletions_CoinsGained_NonNegative",
+                    "\"CoinsGained\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_PestRemovalCompletions_XpGained_NonNegative",
+                    "\"XpGained\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_PestRemovalCompletions_CoinsAfter_NonNegative",
+                    "\"CoinsAfter\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_PestRemovalCompletions_RemainingYield_Positive",
+                    "\"RemainingYieldAfter\" IS NULL OR \"RemainingYieldAfter\" >= 1");
+            });
+        });
+
         modelBuilder.Entity<Plot>(entity =>
         {
             entity.Ignore(p => p.IsReady);
 
             entity.HasIndex(p => p.CareOpportunityId)
                 .IsUnique();
+
+            entity.HasIndex(p => p.PestOccurrenceId);
+
+            entity.Property(p => p.PestStatus)
+                .HasDefaultValue(PestStatus.None);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_Plots_RemainingYield_Positive",
+                    "\"RemainingYield\" IS NULL OR \"RemainingYield\" >= 1");
+                table.HasCheckConstraint(
+                    "CK_Plots_PestConsumedAmount_NonNegative",
+                    "\"PestConsumedAmount\" >= 0");
+            });
         });
 
         modelBuilder.Entity<Seed>()

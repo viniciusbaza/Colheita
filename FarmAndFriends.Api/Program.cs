@@ -35,6 +35,31 @@ builder.Services
     .Validate(options => options.CoinsReward > 0)
     .Validate(options => options.XpReward > 0)
     .ValidateOnStart();
+builder.Services
+    .AddOptions<PestOptions>()
+    .Bind(builder.Configuration.GetSection(PestOptions.SectionName))
+    .Validate(options => options.SafetyPeriodMinutes >= 0)
+    .Validate(options => options.ReactionWindowMinutes > 0)
+    .Validate(options => options.DamageAmount == 1)
+    .Validate(options => options.MaxActivePestsPerFarm > 0)
+    .Validate(options =>
+        options.MinimumInfestationIntervalMinutes >= 0)
+    .Validate(options => options.ProtectionDurationHours > 0)
+    .Validate(options =>
+        options.NaturalRepellentBuyPrice > 0
+        && options.NaturalRepellentMinLevel > 0)
+    .Validate(options =>
+        !string.IsNullOrWhiteSpace(options.NaturalRepellentName)
+        && !string.IsNullOrWhiteSpace(options.NaturalRepellentIcon)
+        && !string.IsNullOrWhiteSpace(
+            options.NaturalRepellentDescription))
+    .Validate(options => options.RemovalCoinsReward >= 0)
+    .Validate(options => options.RemovalXpReward >= 0)
+    .Validate(options =>
+        options.MaxRewardedRemovalsPerWindow > 0)
+    .Validate(options =>
+        options.RemovalRewardRollingWindowHours > 0)
+    .ValidateOnStart();
 
 var jwtSettings = builder.Configuration
     .GetSection("Jwt")
@@ -97,12 +122,12 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddScoped<ExperienceService>();
 // Theft
 builder.Services.AddScoped<TheftService>();
-// Farm Yield
-builder.Services.AddScoped<FarmYieldService>();
 // Friendships
 builder.Services.AddScoped<FriendshipService>();
 // Social crop care
 builder.Services.AddScoped<CropCareService>();
+// Crop pests
+builder.Services.AddScoped<PestService>();
 builder.Services.AddSingleton(TimeProvider.System);
 
 // CORS Policy

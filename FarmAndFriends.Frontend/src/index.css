@@ -7,10 +7,16 @@
   padding: 12px;
   border-radius: 12px;
   min-width: 180px;
+  max-height: calc(100vh - 5rem);
+  max-height: calc(100dvh - 5rem);
+  overflow-y: auto;
   box-shadow: 0 10px 25px rgba(0,0,0,0.25);
-  position: absolute;
-  transform: translate(-50%, -100%);
+  position: relative;
   z-index: 1001;
+}
+
+.plot-modal-anchor {
+  transform: translate(-50%, -100%);
 }
 
 .modal-overlay {
@@ -23,15 +29,7 @@
 
 /* 🐭 Rabinho do balão */
 .plot-modal::after {
-  content: '';
-  position: absolute;
-  bottom: -10px;
-  left: 50%;
-  transform: translateX(-50%);
-
-  border-width: 10px 10px 0 10px;
-  border-style: solid;
-  border-color: white transparent transparent transparent;
+  content: none;
 }
 
 /* 🌾 Ações do Plot */
@@ -81,6 +79,16 @@
   background: #fde68a;
 }
 
+.plot-action:disabled {
+  cursor: wait;
+  opacity: 0.65;
+  transform: none;
+}
+
+.plot-action:disabled:hover {
+  transform: none;
+}
+
 .plot-action.care {
   background: #e0f2fe;
   color: #075985;
@@ -104,6 +112,25 @@
   pointer-events: none;
   background: #f3f4f6;
   color: #6b7280;
+}
+
+@media (max-width: 40rem), (max-height: 43.75rem) {
+  .plot-modal-anchor {
+    position: absolute;
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: max(1rem, env(safe-area-inset-bottom));
+    left: max(1rem, env(safe-area-inset-left)) !important;
+    top: auto !important;
+    display: flex;
+    justify-content: center;
+    transform: none;
+  }
+
+  .plot-modal {
+    width: 100%;
+    max-height: calc(100vh - 2rem);
+    max-height: calc(100dvh - 2rem);
+  }
 }
 
 /* Primeiro contato: cadastro e login */

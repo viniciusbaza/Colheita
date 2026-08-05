@@ -5,6 +5,7 @@ import { useUser } from '../user/useUser'
 import { ShopBuyTab } from './ShopBuyTab'
 import { ShopFeedback } from './ShopFeedback'
 import { ShopSellTab } from './ShopSellTab'
+import { useShopItems } from './useShopItems'
 
 type Props = {
   onClose: () => void
@@ -35,6 +36,12 @@ export function ShopPanel({ onClose }: Props) {
     error: seedsError,
     refreshSeeds,
   } = useSeeds()
+  const {
+    items,
+    loading: loadingItems,
+    error: itemsError,
+    refreshItems,
+  } = useShopItems()
   const { user, refreshUser } = useUser()
   const [tab, setTab] = useState<ShopTab>('buy')
   const [feedback, setFeedback] = useState<Feedback | null>(null)
@@ -145,7 +152,7 @@ export function ShopPanel({ onClose }: Props) {
             onClick={() => setTab('buy')}
             className={tabButtonClass(tab === 'buy')}
           >
-            🌱 Comprar sementes
+            🛒 Comprar
           </button>
           <button
             type="button"
@@ -180,6 +187,10 @@ export function ShopPanel({ onClose }: Props) {
               loadingSeeds={loadingSeeds}
               seedsError={seedsError}
               refreshSeeds={refreshSeeds}
+              items={items}
+              loadingItems={loadingItems}
+              itemsError={itemsError}
+              refreshItems={refreshItems}
               coins={inventory?.coins ?? null}
               userLevel={user?.level ?? null}
               loadingWallet={loading}

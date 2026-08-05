@@ -1,4 +1,5 @@
 import { authFetch } from '../api/http'
+import type { BuyItemResponse } from '../types/Shop'
 
 export const MAX_SHOP_QUANTITY = 10_000
 
@@ -30,8 +31,16 @@ export function useShop() {
     })
   }
 
+  function buyItem(itemId: string, quantity: number) {
+    return authFetch<BuyItemResponse>('/shop/buy-item', {
+      method: 'POST',
+      body: JSON.stringify({ itemId, quantity }),
+    })
+  }
+
   return {
     buySeed,
+    buyItem,
     sellCrop,
   }
 }

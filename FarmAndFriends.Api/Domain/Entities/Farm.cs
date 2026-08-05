@@ -8,5 +8,7 @@ public class Farm
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;
 
+    public DateTime? LastPestInfestationAt { get; set; }
+
     public ICollection<Plot> Plots { get; set; } = new List<Plot>();
 }

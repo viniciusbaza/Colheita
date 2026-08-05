@@ -149,7 +149,7 @@ export function PlayerHUD({
 
   return (
     <>
-      <div className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-between bg-green-900 p-4">
+      <div className="pointer-events-auto fixed inset-x-0 top-0 z-50 flex items-center justify-between bg-green-900/[0.99] p-4">
       <div className="flex items-center gap-4 sm:gap-8">
         <div className="hidden sm:block">
           <p className="text-sm">🌾 Fazenda: {farm?.name}</p>

@@ -8,6 +8,9 @@ using FarmAndFriends.Api.Domain.Entities;
 using FarmAndFriends.Api.Dtos.Shop;
 using FarmAndFriends.Api.Contracts.Shop;
 using FarmAndFriends.Api.Domain.Services;
+using FarmAndFriends.Api.Configuration;
+using FarmAndFriends.Api.Contracts.Pests;
+using Microsoft.Extensions.Options;
 
 namespace FarmAndFriends.Api.Controllers;
 
@@ -20,11 +23,134 @@ public class ShopController : ControllerBase
 
     private readonly AppDbContext _context;
     private readonly ExperienceService _experienceService;
+    private readonly PestOptions _pestOptions;
 
-    public ShopController(AppDbContext context, ExperienceService experienceService)
+    public ShopController(
+        AppDbContext context,
+        ExperienceService experienceService,
+        IOptions<PestOptions> pestOptions)
     {
         _context = context;
         _experienceService = experienceService;
+        _pestOptions = pestOptions.Value;
+    }
+
+    [HttpGet("items")]
+    public IActionResult GetItems()
+    {
+        if (!_pestOptions.Enabled)
+            return Ok(Array.Empty<ShopItemResponse>());
+
+        return Ok(new[]
+        {
+            new ShopItemResponse(
+                PestOptions.NaturalRepellentItemId,
+                _pestOptions.NaturalRepellentName,
+                _pestOptions.NaturalRepellentIcon,
+                _pestOptions.NaturalRepellentDescription,
+                _pestOptions.NaturalRepellentBuyPrice,
+                _pestOptions.NaturalRepellentMinLevel,
+                _pestOptions.ProtectionDurationHours)
+        });
+    }
+
+    [HttpPost("buy-item")]
+    public async Task<IActionResult> BuyItem(
+        [FromBody] BuyItemRequest request)
+    {
+        if (!_pestOptions.Enabled)
+        {
+            var problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status409Conflict,
+                Title = "Sistema de pragas desativado",
+                Detail =
+                    "A compra de itens contra pragas está temporariamente indisponível."
+            };
+            problem.Extensions["code"] =
+                PestErrorCodes.FeatureDisabled;
+            return StatusCode(
+                StatusCodes.Status409Conflict,
+                problem);
+        }
+
+        if (request.Quantity is <= 0 or > MaxQuantityPerTransaction)
+        {
+            return BadRequest(
+                $"A quantidade deve estar entre 1 e {MaxQuantityPerTransaction}.");
+        }
+
+        if (!string.Equals(
+                request.ItemId,
+                PestOptions.NaturalRepellentItemId,
+                StringComparison.Ordinal))
+        {
+            return BadRequest("Item inválido.");
+        }
+
+        var userId = Guid.Parse(
+            User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
+        var user = await _context.LockAsync(userId);
+
+        if (user == null)
+            return Unauthorized();
+
+        if (user.Level < _pestOptions.NaturalRepellentMinLevel)
+            return BadRequest("Level insuficiente para comprar este item.");
+
+        var inventory = await _context.Inventories
+            .FirstOrDefaultAsync(candidate => candidate.UserId == userId);
+
+        if (inventory == null)
+            return BadRequest("Inventário não encontrado.");
+
+        var totalCost =
+            (long)_pestOptions.NaturalRepellentBuyPrice * request.Quantity;
+        if (totalCost <= 0 || totalCost > int.MaxValue)
+            return BadRequest("O custo total do item é inválido.");
+
+        if (inventory.Coins < totalCost)
+            return BadRequest("Coins insuficientes.");
+
+        var item = await _context.InventoryItems.FirstOrDefaultAsync(
+            candidate =>
+                candidate.InventoryId == inventory.Id
+                && candidate.ItemType == ItemType.Item
+                && candidate.ItemId == request.ItemId);
+        var updatedQuantity =
+            (long)(item?.Quantity ?? 0) + request.Quantity;
+
+        if (updatedQuantity > int.MaxValue)
+            return BadRequest("O limite de estoque deste item foi atingido.");
+
+        inventory.Coins -= (int)totalCost;
+        if (item == null)
+        {
+            item = new InventoryItem
+            {
+                Id = Guid.NewGuid(),
+                InventoryId = inventory.Id,
+                ItemType = ItemType.Item,
+                ItemId = request.ItemId,
+                Quantity = (int)updatedQuantity
+            };
+            _context.InventoryItems.Add(item);
+        }
+        else
+        {
+            item.Quantity = (int)updatedQuantity;
+        }
+
+        await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
+
+        return Ok(new BuyItemResponse(
+            request.ItemId,
+            request.Quantity,
+            item.Quantity,
+            inventory.Coins));
     }
 
     [HttpPost("buy-seed")]

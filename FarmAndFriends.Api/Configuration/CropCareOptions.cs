@@ -14,5 +14,5 @@ public sealed class CropCareOptions
     public int MaxRewardedCyclesPerVisitorFarmWindow { get; init; } = 5;
     public int OwnerNotificationDeduplicationWindowHours { get; init; } = 24;
     public int CoinsReward { get; init; } = 2;
-    public int XpReward { get; init; } = 2;
+    public int XpReward { get; init; } = 5;
 }

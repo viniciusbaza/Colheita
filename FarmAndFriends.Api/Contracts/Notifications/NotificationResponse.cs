@@ -11,6 +11,7 @@ public record NotificationResponse(
     Guid? FriendshipId,
     Guid? TheftLogId,
     Guid? CareOpportunityId,
+    Guid? PestPlotId,
     DateTime CreatedAt,
     DateTime? ReadAt
 );

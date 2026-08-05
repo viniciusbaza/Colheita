@@ -12,6 +12,12 @@ export function getNotificationTitle(notification: SocialNotification) {
       return 'Roubo na fazenda'
     case NotificationType.CropCaredFor:
       return 'Cuidado na plantação'
+    case NotificationType.PestConsumed:
+      return 'Lagarta na colheita'
+    case NotificationType.PestRemoved:
+      return 'Lagarta removida'
+    case NotificationType.PestProtectionApplied:
+      return 'Lote protegido'
     default:
       return 'Nova notificação'
   }
@@ -29,6 +35,11 @@ export function getNotificationIcon(notification: SocialNotification) {
       return '🥷'
     case NotificationType.CropCaredFor:
       return '💧'
+    case NotificationType.PestConsumed:
+    case NotificationType.PestRemoved:
+      return '🐛'
+    case NotificationType.PestProtectionApplied:
+      return '🛡️'
     default:
       return '🔔'
   }
@@ -52,6 +63,12 @@ export function getNotificationMessage(notification: SocialNotification) {
       return `${actor} roubou um item da sua fazenda.`
     case NotificationType.CropCaredFor:
       return `${actor} cuidou de uma plantação na sua fazenda.`
+    case NotificationType.PestConsumed:
+      return 'Uma lagarta comeu parte de uma colheita da sua fazenda.'
+    case NotificationType.PestRemoved:
+      return `${actor} removeu uma lagarta da sua plantação.`
+    case NotificationType.PestProtectionApplied:
+      return `${actor} protegeu um lote da sua fazenda contra pragas.`
     default:
       return 'Você recebeu uma nova notificação.'
   }

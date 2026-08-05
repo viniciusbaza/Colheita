@@ -1,5 +1,6 @@
 using FarmAndFriends.Api.Contracts.Farms;
 using FarmAndFriends.Api.Domain.Entities;
+using FarmAndFriends.Api.Domain.Enums;
 using FarmAndFriends.Api.Domain.Services;
 using FarmAndFriends.Api.Mappers;
 using Xunit;
@@ -212,6 +213,53 @@ public sealed class FarmMapperTests
             new Dictionary<Guid, PlotCropCareState>());
 
         Assert.Null(Assert.Single(response.Plots).Care);
+    }
+
+    [Fact]
+    public void ActivePestAndExpiredProtection_AreMappedAuthoritatively()
+    {
+        var now = Utc(2026, 7, 26, 10);
+        var farm = CreateFarm(Guid.NewGuid(), now);
+        var plot = Assert.Single(farm.Plots);
+        plot.ReadyAt = now.AddMinutes(-30);
+        plot.RemainingYield = 2;
+        plot.PestType = PestType.Caterpillar;
+        plot.PestStatus = PestStatus.Active;
+        plot.PestScheduledAt = now.AddMinutes(-10);
+        plot.PestAppearsAt = now.AddMinutes(-5);
+        plot.PestAppearedAt = now.AddMinutes(-5);
+        plot.PestConsumesAt = now.AddMinutes(10);
+        plot.ProtectedUntil = now.AddHours(-1);
+
+        var response = FarmMapper.ToFarmResponse(
+            farm,
+            now,
+            new Dictionary<Guid, PlotCropCareState>());
+        var mappedPlot = Assert.Single(response.Plots);
+
+        Assert.Null(mappedPlot.ProtectedUntil);
+        Assert.Equal(2, mappedPlot.RemainingYield);
+        Assert.NotNull(mappedPlot.Pest);
+        Assert.Equal("caterpillar", mappedPlot.Pest.Type);
+        Assert.Equal("active", mappedPlot.Pest.Status);
+        Assert.True(mappedPlot.Pest.CanRemove);
+        Assert.Equal(plot.PestConsumesAt, mappedPlot.Pest.ConsumesAt);
+    }
+
+    [Fact]
+    public void FarmResponse_ExposesServerComputedNextPestCheckAt()
+    {
+        var now = Utc(2026, 7, 26, 10);
+        var nextPestCheckAt = now.AddMinutes(15);
+        var farm = CreateFarm(Guid.NewGuid(), now);
+
+        var response = FarmMapper.ToFarmResponse(
+            farm,
+            now,
+            new Dictionary<Guid, PlotCropCareState>(),
+            nextPestCheckAt);
+
+        Assert.Equal(nextPestCheckAt, response.NextPestCheckAt);
     }
 
     private static Farm CreateFarm(Guid ownerId, DateTime now)

@@ -91,6 +91,9 @@ namespace FarmAndFriends.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("LastPestInfestationAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
@@ -217,6 +220,9 @@ namespace FarmAndFriends.Api.Migrations
                     b.Property<string>("Message")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("PestPlotId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("ReadAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -241,6 +247,8 @@ namespace FarmAndFriends.Api.Migrations
                     b.HasIndex("TheftLogId")
                         .IsUnique();
 
+                    b.HasIndex("PestPlotId", "CreatedAt");
+
                     b.HasIndex("RecipientUserId", "ReadAt", "CreatedAt");
 
                     b.HasIndex("Type", "ActorUserId", "CreatedAt");
@@ -248,6 +256,69 @@ namespace FarmAndFriends.Api.Migrations
                     b.HasIndex("Type", "ActorUserId", "RecipientUserId", "CreatedAt");
 
                     b.ToTable("Notifications");
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.PestRemovalCompletion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CoinsAfter")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CoinsGained")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("FarmId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("IdempotencyKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PestOccurrenceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PlotId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("RemainingYieldAfter")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("RemovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("XpGained")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId");
+
+                    b.HasIndex("PestOccurrenceId")
+                        .IsUnique();
+
+                    b.HasIndex("ActorUserId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("ActorUserId", "RemovedAt");
+
+                    b.ToTable("PestRemovalCompletions", t =>
+                        {
+                            t.HasCheckConstraint("CK_PestRemovalCompletions_CoinsAfter_NonNegative", "\"CoinsAfter\" >= 0");
+
+                            t.HasCheckConstraint("CK_PestRemovalCompletions_CoinsGained_NonNegative", "\"CoinsGained\" >= 0");
+
+                            t.HasCheckConstraint("CK_PestRemovalCompletions_RemainingYield_Positive", "\"RemainingYieldAfter\" IS NULL OR \"RemainingYieldAfter\" >= 1");
+
+                            t.HasCheckConstraint("CK_PestRemovalCompletions_XpGained_NonNegative", "\"XpGained\" >= 0");
+                        });
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Plot", b =>
@@ -262,7 +333,39 @@ namespace FarmAndFriends.Api.Migrations
                     b.Property<Guid>("FarmId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("PestAppearedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PestAppearsAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PestConsumedAmount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("PestConsumesAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PestOccurrenceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PestResolvedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PestScheduledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("PestStatus")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<int?>("PestType")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime?>("PlantedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ProtectedUntil")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("ReadyAt")
@@ -290,7 +393,14 @@ namespace FarmAndFriends.Api.Migrations
 
                     b.HasIndex("FarmId");
 
-                    b.ToTable("Plots");
+                    b.HasIndex("PestOccurrenceId");
+
+                    b.ToTable("Plots", t =>
+                        {
+                            t.HasCheckConstraint("CK_Plots_PestConsumedAmount_NonNegative", "\"PestConsumedAmount\" >= 0");
+
+                            t.HasCheckConstraint("CK_Plots_RemainingYield_Positive", "\"RemainingYield\" IS NULL OR \"RemainingYield\" >= 1");
+                        });
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.RefreshToken", b =>
@@ -657,6 +767,25 @@ namespace FarmAndFriends.Api.Migrations
                     b.Navigation("RecipientUser");
 
                     b.Navigation("TheftLog");
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.PestRemovalCompletion", b =>
+                {
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.User", "ActorUser")
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ActorUser");
+
+                    b.Navigation("OwnerUser");
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Plot", b =>

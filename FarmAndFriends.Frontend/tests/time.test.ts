@@ -1,9 +1,30 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  formatCountdown,
   getNextCareAt,
+  getNextFarmStateAt,
+  getNextPestOrProtectionAt,
   getNextPlotReadyAt,
 } from '../src/utils/time.ts'
+
+test('formats display-only pest and protection countdowns', () => {
+  const now = Date.parse('2026-07-30T10:00:00.000Z')
+
+  assert.equal(
+    formatCountdown('2026-07-30T11:34:20.000Z', now),
+    '01:34:20',
+  )
+  assert.equal(
+    formatCountdown('2026-07-30T10:08:42.000Z', now),
+    '08:42',
+  )
+  assert.equal(
+    formatCountdown('2026-07-30T09:00:00.000Z', now),
+    '00:00',
+  )
+  assert.equal(formatCountdown('invalid-date', now), null)
+})
 
 test('returns the nearest pending plot deadline', () => {
   const nextReadyAt = getNextPlotReadyAt([
@@ -200,4 +221,127 @@ test('past care deadlines never enable care locally', () => {
   ], now)
 
   assert.equal(nextCareAt, null)
+})
+
+test('returns the nearest scheduled appearance, active consumption, or protection expiry', () => {
+  const now = Date.parse('2026-07-30T10:00:00.000Z')
+  const nextPestAt = getNextPestOrProtectionAt([
+    {
+      pest: {
+        status: 'scheduled',
+        appearsAt: '2026-07-30T10:15:00.000Z',
+      },
+    },
+    {
+      pest: {
+        status: 'active',
+        consumesAt: '2026-07-30T10:12:00.000Z',
+      },
+    },
+    {
+      protectedUntil: '2026-07-30T10:08:00.000Z',
+    },
+  ], now)
+
+  assert.equal(nextPestAt, Date.parse('2026-07-30T10:08:00.000Z'))
+})
+
+test('ignores resolved pests, unrelated pest timestamps, and expired deadlines', () => {
+  const now = Date.parse('2026-07-30T10:00:00.000Z')
+  const nextPestAt = getNextPestOrProtectionAt([
+    {
+      protectedUntil: '2026-07-30T09:59:00.000Z',
+      pest: {
+        status: 'consumed',
+        consumesAt: '2026-07-30T10:15:00.000Z',
+      },
+    },
+    {
+      pest: {
+        status: 'active',
+        appearsAt: '2026-07-30T10:05:00.000Z',
+        consumesAt: 'invalid-date',
+      },
+    },
+  ], now)
+
+  assert.equal(nextPestAt, null)
+})
+
+test('combines ready, care, pest, and protection into one authoritative refresh deadline', () => {
+  const now = Date.parse('2026-07-30T10:00:00.000Z')
+  const plots = [
+    {
+      seedId: 'corn',
+      isReady: false,
+      readyAt: '2026-07-30T10:20:00.000Z',
+      protectedUntil: '2026-07-30T10:18:00.000Z',
+      care: {
+        canCare: false,
+        rewardAvailable: false,
+        nextCareAt: '2026-07-30T10:10:00.000Z',
+      },
+      pest: null,
+    },
+    {
+      seedId: 'tomato',
+      isReady: true,
+      readyAt: '2026-07-30T09:00:00.000Z',
+      protectedUntil: null,
+      care: null,
+      pest: {
+        status: 'active',
+        consumesAt: '2026-07-30T10:05:00.000Z',
+      },
+    },
+  ]
+
+  assert.equal(
+    getNextFarmStateAt(plots, true, null, now),
+    Date.parse('2026-07-30T10:05:00.000Z'),
+  )
+})
+
+test('does not use visitor-only care deadlines on the owner farm', () => {
+  const now = Date.parse('2026-07-30T10:00:00.000Z')
+  const plots = [{
+    seedId: 'corn',
+    isReady: false,
+    readyAt: '2026-07-30T10:20:00.000Z',
+    protectedUntil: '2026-07-30T10:15:00.000Z',
+    care: {
+      canCare: false,
+      rewardAvailable: false,
+      nextCareAt: '2026-07-30T10:05:00.000Z',
+    },
+    pest: null,
+  }]
+
+  assert.equal(
+    getNextFarmStateAt(plots, false, null, now),
+    Date.parse('2026-07-30T10:15:00.000Z'),
+  )
+})
+
+test('includes the server-provided next pest evaluation without deriving safety locally', () => {
+  const now = Date.parse('2026-07-30T10:00:00.000Z')
+  const nextPestCheckAt = '2026-07-30T10:03:00.000Z'
+
+  assert.equal(
+    getNextFarmStateAt([], false, nextPestCheckAt, now),
+    Date.parse(nextPestCheckAt),
+  )
+})
+
+test('ignores an invalid or elapsed server pest evaluation deadline', () => {
+  const now = Date.parse('2026-07-30T10:00:00.000Z')
+
+  assert.equal(
+    getNextFarmStateAt([], false, 'invalid-date', now),
+    null,
+  )
+  assert.equal(
+    getNextFarmStateAt([], false, '2026-07-30T09:59:59.000Z', now),
+    null,
+  )
 })

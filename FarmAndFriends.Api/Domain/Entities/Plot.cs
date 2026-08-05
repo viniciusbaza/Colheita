@@ -1,3 +1,5 @@
+using FarmAndFriends.Api.Domain.Enums;
+
 namespace FarmAndFriends.Api.Domain.Entities;
 
 public class Plot
@@ -21,4 +23,15 @@ public class Plot
     public int? RemainingYield { get; set; }
 
     public Guid? CareOpportunityId { get; set; }
+
+    public Guid? PestOccurrenceId { get; set; }
+    public PestType? PestType { get; set; }
+    public PestStatus PestStatus { get; set; } = PestStatus.None;
+    public DateTime? PestScheduledAt { get; set; }
+    public DateTime? PestAppearsAt { get; set; }
+    public DateTime? PestAppearedAt { get; set; }
+    public DateTime? PestConsumesAt { get; set; }
+    public DateTime? PestResolvedAt { get; set; }
+    public int PestConsumedAmount { get; set; }
+    public DateTime? ProtectedUntil { get; set; }
 }

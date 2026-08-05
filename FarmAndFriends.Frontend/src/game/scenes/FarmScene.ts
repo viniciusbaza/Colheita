@@ -28,14 +28,16 @@ import readyPumpkinImage from '../assets/tiles/ready/pumpkin.png'
 import readyTomatoImage from '../assets/tiles/ready/tomato.png'
 import type {
   Farm,
+  PestStatus,
   Plot,
   PlotCareDone,
   PlotHarvestDone,
+  PlotPestRemoveDone,
   PlotPlantDone,
   PlotStealDone,
 } from '../../types/Farm'
 
-type XpSource = 'HARVEST' | 'PLANT' | 'STEAL' | 'CARE'
+type XpSource = 'HARVEST' | 'PLANT' | 'STEAL' | 'CARE' | 'PEST_REMOVE'
 
 const GROWTH_STAGE_2_THRESHOLD = 0.5
 const PLOT_SCALE = 0.11
@@ -76,6 +78,12 @@ function getGrowthProgress(plot: Plot): number {
   const elapsed = now - planted
 
   return Math.min(Math.max(elapsed / total, 0), 1)
+}
+
+function isPlotProtected(plot: Plot): boolean {
+  // FarmMapper only exposes a currently valid protection. Presence is the
+  // server decision; the browser clock must not reveal a hidden pest early.
+  return plot.protectedUntil !== null
 }
 
 export default class FarmScene extends Phaser.Scene {
@@ -203,10 +211,15 @@ export default class FarmScene extends Phaser.Scene {
     // Evento de roubo
     window.addEventListener('plot:steal:done', this.onStealDone)
     window.addEventListener('plot:care:done', this.onCareDone)
+    window.addEventListener('plot:pest:remove:done', this.onPestRemoveDone)
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('plot:steal:done', this.onStealDone)
       window.removeEventListener('plot:care:done', this.onCareDone)
+      window.removeEventListener(
+        'plot:pest:remove:done',
+        this.onPestRemoveDone,
+      )
       this.scale.off(Phaser.Scale.Events.RESIZE, this.onResize)
       window.removeEventListener(
         FARM_CAMERA_MODE_EVENT,
@@ -217,6 +230,8 @@ export default class FarmScene extends Phaser.Scene {
       this.input.off('pointerup', this.onPanPointerUp)
       this.input.off('pointerupoutside', this.onPanPointerUp)
       this.input.off('gameout', this.onPointerLeave)
+      this.cleanupPestVisuals()
+      this.plotTiles.clear()
       this.cancelPan()
       this.stopCameraMotion()
       this.game.canvas.style.cursor = 'default'
@@ -618,17 +633,23 @@ export default class FarmScene extends Phaser.Scene {
     tile.setData('gridY', plot.y)
 
     this.plotTiles.set(plot.id, tile)
+    tile.setData('lastRemainingYield', plot.remainingYield)
+    tile.setData('lastPestStatus', plot.pest?.status ?? null)
 
     // 🌟 Efeitos para plots ready
     if (plot.seedId && plot.isReady) {
       this.addReadyPulse(tile)
       this.addGlowEffect(tile)
-      if (plot.remainingYield > 0) {
+      if (
+        typeof plot.remainingYield === 'number'
+        && plot.remainingYield > 0
+      ) {
         this.addRemainingYieldBadge(tile, plot.remainingYield)
       }
     }
 
     this.syncCareBadge(tile, plot, false)
+    this.syncPestVisual(tile, plot, false)
 
     // Abre somente em tap/click. Um arrasto iniciado sobre o plot move a
     // câmera sem abrir o modal acidentalmente.
@@ -691,7 +712,11 @@ export default class FarmScene extends Phaser.Scene {
     })
   }
 
-  private addRemainingYieldBadge(tile: Phaser.GameObjects.Image, remainingYield: number) {
+  private addRemainingYieldBadge(
+    tile: Phaser.GameObjects.Image,
+    remainingYield: number,
+    animate = true,
+  ) {
     const badge = this.add.container(tile.x + 5, tile.y - 5)
 
     // sombra
@@ -714,15 +739,17 @@ export default class FarmScene extends Phaser.Scene {
 
     badge
       .setDepth(DEPTH.BADGES + tile.depth)
-      .setScale(0)
+      .setScale(animate && !this.reduceMotion ? 0 : 1)
 
     // animação de entrada
-    this.tweens.add({
-      targets: badge,
-      scale: 1,
-      duration: 220,
-      ease: 'Back.out'
-    })
+    if (animate && !this.reduceMotion) {
+      this.tweens.add({
+        targets: badge,
+        scale: 1,
+        duration: 220,
+        ease: 'Back.out'
+      })
+    }
 
     tile.setData('yieldBadge', {
       container: badge,
@@ -752,7 +779,28 @@ export default class FarmScene extends Phaser.Scene {
     tile.setData('yieldBadge', null)
   }
 
-  private updateRemainingYieldBadge(tile: Phaser.GameObjects.Image, remainingYield: number ) {
+  private setRemainingYieldBadgeValue(
+    tile: Phaser.GameObjects.Image,
+    remainingYield: number,
+  ) {
+    const data = tile.getData('yieldBadge') as {
+      container: Phaser.GameObjects.Container
+      text: Phaser.GameObjects.BitmapText
+    }
+
+    if (!data) return
+
+    const { text } = data
+    if (!text) return
+
+    text.setText(`x${remainingYield}`)
+  }
+
+  private updateRemainingYieldBadge(
+    tile: Phaser.GameObjects.Image,
+    remainingYield: number,
+    feedbackTint = 0xff5555,
+  ) {
     const data = tile.getData('yieldBadge') as {
       container: Phaser.GameObjects.Container
       text: Phaser.GameObjects.BitmapText
@@ -763,23 +811,176 @@ export default class FarmScene extends Phaser.Scene {
     const { container, text } = data
     if (!text || !container) return
 
-    text.setText(`x${remainingYield}`)
+    this.setRemainingYieldBadgeValue(tile, remainingYield)
 
-    this.tweens.add({
-      targets: container,
-      scale: 1.15,
-      duration: 120,
-      yoyo: true,
-      ease: 'Sine.easeInOut'
-    })
+    if (!this.reduceMotion) {
+      this.tweens.add({
+        targets: container,
+        scale: 1.15,
+        duration: 120,
+        yoyo: true,
+        ease: 'Sine.easeInOut'
+      })
+    }
 
-    // 🔴 feedback de roubo
-    text.setTint(0xff5555)
+    text.setTint(feedbackTint)
 
     this.time.delayedCall(400, () => {
       if (!text.scene) return
       text.clearTint()
     })
+  }
+
+  private syncPestVisual(
+    tile: Phaser.GameObjects.Image,
+    plot: Plot,
+    animate = true,
+  ) {
+    const pest = plot.pest
+    const shouldShow =
+      pest?.type === 'caterpillar' &&
+      pest.status === 'active' &&
+      Boolean(plot.seedId) &&
+      plot.isReady &&
+      !isPlotProtected(plot)
+    const current = tile.getData('pestVisual') as
+      | Phaser.GameObjects.Text
+      | undefined
+
+    if (!shouldShow) {
+      this.removePestVisual(tile)
+      return
+    }
+
+    if (current?.scene) return
+
+    this.addCaterpillarVisual(tile, animate)
+  }
+
+  private addCaterpillarVisual(
+    tile: Phaser.GameObjects.Image,
+    animate = true,
+  ) {
+    this.removePestVisual(tile)
+
+    // Emoji glyphs are vendor-rendered. Keeping the conventional left-facing
+    // caterpillar on the crop's right side makes its head point to the plant.
+    const caterpillar = this.add.text(
+      tile.x + tile.displayWidth * 0.25,
+      tile.y - tile.displayHeight * 0.62,
+      '🐛',
+      {
+        fontFamily:
+          '"Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif',
+        fontSize: '14px',
+        resolution: 3,
+        padding: { x: 2, y: 2 },
+        shadow: {
+          offsetX: 1,
+          offsetY: 1,
+          color: '#1f2937',
+          blur: 0,
+          fill: true,
+        },
+      },
+    )
+      .setOrigin(0.5)
+      .setDepth(DEPTH.BADGES + tile.depth + 2)
+      .setScale(animate && !this.reduceMotion ? 0 : 1)
+
+    tile.setData('pestVisual', caterpillar)
+
+    if (animate && !this.reduceMotion) {
+      this.tweens.add({
+        targets: caterpillar,
+        scale: 1,
+        duration: 220,
+        ease: 'Back.out',
+      })
+    }
+
+    if (!this.reduceMotion) {
+      this.tweens.add({
+        targets: caterpillar,
+        y: caterpillar.y - 3,
+        angle: { from: -3, to: 3 },
+        duration: 850,
+        ease: 'Sine.easeInOut',
+        yoyo: true,
+        repeat: -1,
+      })
+    }
+  }
+
+  private removePestVisual(tile: Phaser.GameObjects.Image) {
+    const caterpillar = tile.getData('pestVisual') as
+      | Phaser.GameObjects.Text
+      | undefined
+
+    if (caterpillar) {
+      this.tweens.killTweensOf(caterpillar)
+      caterpillar.destroy()
+    }
+
+    tile.setData('pestVisual', null)
+  }
+
+  private spawnPestConsumptionFeedback(
+    tile: Phaser.GameObjects.Image,
+    consumedAmount: number | null,
+  ) {
+    const message = consumedAmount && consumedAmount > 0
+      ? `🐛 Lagarta comeu ${consumedAmount}`
+      : '🐛 Dano de lagarta'
+    const y = tile.y - tile.displayHeight * 0.92
+    const text = this.add.text(tile.x, y, message, {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#fef3c7',
+      stroke: '#78350f',
+      strokeThickness: 3,
+    })
+      .setOrigin(0.5)
+      .setDepth(DEPTH.FEEDBACK)
+
+    this.tweens.add({
+      targets: text,
+      y: y - (this.reduceMotion ? 12 : 26),
+      alpha: 0,
+      duration: this.reduceMotion ? 650 : 1_100,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    })
+  }
+
+  private spawnPestTheftFeedback(tile: Phaser.GameObjects.Image) {
+    const y = tile.y - tile.displayHeight - 10
+    const text = this.add.text(tile.x, y, '🐛 Lagarta espantada!', {
+      fontFamily: 'Arial, sans-serif',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#ecfccb',
+      stroke: '#365314',
+      strokeThickness: 3,
+    })
+      .setOrigin(0.5)
+      .setDepth(DEPTH.FEEDBACK)
+
+    this.tweens.add({
+      targets: text,
+      y: y - (this.reduceMotion ? 10 : 22),
+      alpha: 0,
+      duration: this.reduceMotion ? 600 : 950,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    })
+  }
+
+  private cleanupPestVisuals() {
+    for (const tile of this.plotTiles.values()) {
+      this.removePestVisual(tile)
+    }
   }
 
   private syncCareBadge(
@@ -926,6 +1127,21 @@ export default class FarmScene extends Phaser.Scene {
       const tile = this.plotTiles.get(plot.id)
       if (!tile) continue
 
+      const pest = plot.pest
+      const previousRemainingYield = tile.getData('lastRemainingYield') as
+        | number
+        | null
+        | undefined
+      const previousPestStatus = tile.getData('lastPestStatus') as
+        | PestStatus
+        | null
+        | undefined
+      const pestConsumedWithReduction =
+        previousPestStatus !== 'consumed' &&
+        pest?.status === 'consumed' &&
+        typeof previousRemainingYield === 'number' &&
+        typeof plot.remainingYield === 'number' &&
+        plot.remainingYield < previousRemainingYield
       const newTexture = this.getPlotTexture(plot)
 
       if (tile.texture.key !== newTexture) {
@@ -940,18 +1156,58 @@ export default class FarmScene extends Phaser.Scene {
           this.addReadyPulse(tile)
           this.addGlowEffect(tile)
         }
-        const badge = tile.getData('yieldBadge')
-        if (!badge && plot.remainingYield > 0) {
-          this.addRemainingYieldBadge(tile, plot.remainingYield)
+
+        if (
+          typeof plot.remainingYield === 'number'
+          && plot.remainingYield > 0
+        ) {
+          const badge = tile.getData('yieldBadge')
+          if (!badge) {
+            this.addRemainingYieldBadge(
+              tile,
+              plot.remainingYield,
+              !pestConsumedWithReduction,
+            )
+          }
+
+          if (previousRemainingYield !== plot.remainingYield) {
+            if (pestConsumedWithReduction) {
+              this.updateRemainingYieldBadge(
+                tile,
+                plot.remainingYield,
+                0xf59e0b,
+              )
+            } else {
+              this.setRemainingYieldBadgeValue(
+                tile,
+                plot.remainingYield,
+              )
+            }
+          }
+        } else {
+          this.removeRemainingYieldBadge(tile)
         }
       } else {
         // 🧹 remove efeitos se não estiver ready
         const glow = tile.getData('glow')
+        this.tweens.killTweensOf(glow)
         glow?.destroy()
         tile.setData('glow', null)
         this.tweens.killTweensOf(tile)
         this.removeRemainingYieldBadge(tile)
       }
+
+      this.syncPestVisual(tile, plot)
+
+      if (pestConsumedWithReduction) {
+        this.spawnPestConsumptionFeedback(
+          tile,
+          pest?.consumedAmount ?? null,
+        )
+      }
+
+      tile.setData('lastRemainingYield', plot.remainingYield)
+      tile.setData('lastPestStatus', pest?.status ?? null)
     }
   }
 
@@ -981,11 +1237,13 @@ export default class FarmScene extends Phaser.Scene {
 
     // 🔥 Remove glow e pulse
     const glow = tile.getData('glow')
+    this.tweens.killTweensOf(glow)
     glow?.destroy()
     tile.setData('glow', null)
     this.tweens.killTweensOf(tile)
     this.removeRemainingYieldBadge(tile)
     this.removeCareBadge(tile)
+    this.removePestVisual(tile)
 
     // 🌱 Volta ao estado de plot vazio
     tile.setScale(PLOT_SCALE)
@@ -1027,7 +1285,7 @@ export default class FarmScene extends Phaser.Scene {
       const rewardX = tile.x
       const rewardY = tile.y - tile.displayHeight * 0.9
       const xpDelay = coinsGained > 0
-        ? this.spawnCareReward(rewardX, rewardY, coinsGained)
+        ? this.spawnCoinReward(rewardX, rewardY, coinsGained)
         : 0
 
       if (xpGained > 0) {
@@ -1036,6 +1294,39 @@ export default class FarmScene extends Phaser.Scene {
         })
       }
     })
+  }
+
+  private onPestRemoveDone = (e: Event) => {
+    const {
+      plotId,
+      pestOccurrenceId,
+      coinsGained,
+      xpGained,
+    } = (e as CustomEvent<PlotPestRemoveDone>).detail
+
+    const tile = this.plotTiles.get(plotId)
+    if (!tile) return
+    const currentPlot = this.farm.plots.find(plot => plot.id === plotId)
+
+    // An idempotent retry can arrive after another planting cycle. Keep a
+    // confirmed result from hiding or rewarding feedback over a newer pest.
+    if (currentPlot?.pest?.occurrenceId !== pestOccurrenceId) return
+
+    this.removePestVisual(tile)
+
+    const rewardX = tile.x
+    const rewardY = tile.y - tile.displayHeight * 0.9
+    const xpDelay = coinsGained > 0
+      ? this.spawnCoinReward(rewardX, rewardY, coinsGained)
+      : 0
+
+    if (xpGained > 0) {
+      this.time.delayedCall(xpDelay, () => {
+        this.spawnXp(rewardX, rewardY, xpGained, 'PEST_REMOVE')
+      })
+    } else if (coinsGained <= 0) {
+      this.spawnPestRemovalFeedback(rewardX, rewardY)
+    }
   }
 
   private animatePlotCare(tile: Phaser.GameObjects.Image) {
@@ -1077,7 +1368,7 @@ export default class FarmScene extends Phaser.Scene {
     })
   }
 
-  private spawnCareReward(
+  private spawnCoinReward(
     x: number,
     y: number,
     coinsGained: number,
@@ -1112,14 +1403,54 @@ export default class FarmScene extends Phaser.Scene {
     return duration
   }
 
+  private spawnPestRemovalFeedback(x: number, y: number) {
+    const text = this.add.text(
+      x,
+      y,
+      '🐛 Colheita salva\nSem recompensa desta vez',
+      {
+        fontFamily:
+          '"Arial Rounded MT Bold", "Trebuchet MS", Arial, sans-serif',
+        fontSize: '12px',
+        fontStyle: 'bold',
+        color: '#ecfccb',
+        stroke: '#365314',
+        strokeThickness: 3,
+        align: 'center',
+      },
+    )
+      .setOrigin(0.5)
+      .setDepth(DEPTH.FEEDBACK)
+
+    this.tweens.add({
+      targets: text,
+      y: y - (this.reduceMotion ? 8 : 20),
+      alpha: 0,
+      duration: this.reduceMotion ? 500 : 850,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    })
+  }
+
   private onStealDone = async (e: Event) => {
-    const { plotId, remainingYield, xpGained } = (e as CustomEvent<PlotStealDone>).detail
+    const {
+      plotId,
+      remainingYield,
+      xpGained,
+      pestCancelled,
+    } = (e as CustomEvent<PlotStealDone>).detail
 
     const tile = this.plotTiles.get(plotId)
     if (!tile) return
 
     // ⏱ aguarda o Phaser estabilizar a cena
     this.time.delayedCall(0, () => {
+      if (pestCancelled) {
+        // A confirmação vem no resultado autoritativo do roubo; farm:sync
+        // continua sendo a fonte do status persistido da infestação.
+        this.removePestVisual(tile)
+        this.spawnPestTheftFeedback(tile)
+      }
       // 1️⃣ Atualiza badge
       this.updateRemainingYieldBadge(tile, remainingYield)
       // 2️⃣ Animação de roubo
@@ -1160,7 +1491,13 @@ export default class FarmScene extends Phaser.Scene {
   }
 
   private spawnXp(x: number, y: number, amount: number, source: XpSource = 'HARVEST') {
-    const styles = {
+    const styles: Record<XpSource, {
+      color: string
+      stroke: string
+      scale: number
+      fontFamily?: string
+      fontStyle?: string
+    }> = {
       HARVEST: {
         color: '#7CFF7C',
         stroke: '#1B5E20',
@@ -1181,25 +1518,39 @@ export default class FarmScene extends Phaser.Scene {
         stroke: '#075985',
         scale: 1.2,
       },
+      PEST_REMOVE: {
+        color: '#D9F99D',
+        stroke: '#365314',
+        scale: 1.2,
+        fontFamily:
+          '"Arial Rounded MT Bold", "Trebuchet MS", Arial, sans-serif',
+        fontStyle: 'bold',
+      },
     }
 
     const style = styles[source]
-
-    const text = this.add.text(x, y, `+${amount} XP`, {
+    const textStyle: Phaser.Types.GameObjects.Text.TextStyle = {
       fontSize: '16px',
       color: style.color,
       stroke: style.stroke,
       strokeThickness: 3,
-    })
+    }
+
+    if (style.fontFamily) textStyle.fontFamily = style.fontFamily
+    if (style.fontStyle) textStyle.fontStyle = style.fontStyle
+
+    const text = this.add.text(x, y, `+${amount} XP`, textStyle)
       .setOrigin(0.5)
       .setDepth(DEPTH.FEEDBACK)
 
+    const reducePestMotion = this.reduceMotion && source === 'PEST_REMOVE'
+
     this.tweens.add({
       targets: text,
-      y: y - 30,
+      y: y - (reducePestMotion ? 10 : 30),
       alpha: 0,
-      scale: style.scale,
-      duration: 800,
+      scale: reducePestMotion ? 1 : style.scale,
+      duration: reducePestMotion ? 500 : 800,
       ease: 'Cubic.easeOut',
       onComplete: () => text.destroy(),
     })

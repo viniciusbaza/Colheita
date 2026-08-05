@@ -28,7 +28,7 @@ export default function Game() {
   // Estado de loading
   if (loading || farmLoading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-black text-white">
+      <div className="h-screen flex items-center justify-center bg-[#dff5ff] text-emerald-950">
         <p>🔄 Carregando jogador...</p>
         <p>🌱 Carregando fazenda...</p>
       </div>
@@ -79,11 +79,15 @@ export default function Game() {
       {/* Modal do Plot */}
       {selectedPlot && (() => {
         const MARGIN = 16
+        const horizontalSafeMargin = Math.min(
+          window.innerWidth / 2,
+          160,
+        )
         
         const modalX = clamp(
           selectedPlot.x,
-          MARGIN,
-          window.innerWidth - MARGIN
+          horizontalSafeMargin,
+          Math.max(horizontalSafeMargin, window.innerWidth - horizontalSafeMargin)
         )
 
         const modalY = clamp(
@@ -94,11 +98,10 @@ export default function Game() {
 
         return (
           <div className='fixed inset-0 z-40' onClick={closePlot}>
-            <div className='fixed z-50'
+            <div className='plot-modal-anchor fixed z-50'
               style={{
                 left: modalX,
                 top: modalY,
-                transform: 'translate(-50%, -100%)',
               }}
               onClick={(e) => e.stopPropagation()}
             >

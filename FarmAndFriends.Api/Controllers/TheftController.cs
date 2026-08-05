@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using FarmAndFriends.Api.Domain.Entities;
 using FarmAndFriends.Api.Domain.Enums;
+using FarmAndFriends.Api.Domain.Rules;
 using FarmAndFriends.Api.Domain.Services;
 using FarmAndFriends.Api.Dtos.Theft;
 using FarmAndFriends.Api.Infrastructure.Data;
@@ -17,25 +18,31 @@ public class TheftController : ControllerBase
     private readonly TheftService _theftService;
     private readonly ExperienceService _experienceService;
     private readonly FriendshipService _friendshipService;
+    private readonly PestService _pestService;
 
     public TheftController(
         AppDbContext context,
         TheftService theftService,
         ExperienceService experienceService,
-        FriendshipService friendshipService)
+        FriendshipService friendshipService,
+        PestService pestService)
     {
         _context = context;
         _theftService = theftService;
         _experienceService = experienceService;
         _friendshipService = friendshipService;
+        _pestService = pestService;
     }
 
     [HttpPost]
     public async Task<IActionResult> Steal(Guid farmId, Guid plotId)
     {
-        var thiefUserId = Guid.Parse(
-            User.FindFirstValue(ClaimTypes.NameIdentifier)!
-        );
+        if (!Guid.TryParse(
+                User.FindFirstValue(ClaimTypes.NameIdentifier),
+                out var thiefUserId))
+        {
+            return Unauthorized();
+        }
 
         await using var transaction =
             await _context.Database.BeginTransactionAsync();
@@ -44,84 +51,78 @@ public class TheftController : ControllerBase
         if (thief == null)
             return Unauthorized();
 
-        // 1️⃣ Carregar plot + seed + farm
-        var plot = await _context.Plots
-            .Include(p => p.Farm)
-            .FirstOrDefaultAsync(p => p.Id == plotId && p.FarmId == farmId);
+        var farm = await _context.LockFarmAsync(farmId);
+        if (farm == null)
+            return NotFound("Fazenda não encontrada.");
+
+        var plots = await _context.LockFarmPlotsAsync(farmId);
+        var plot = plots.SingleOrDefault(candidate => candidate.Id == plotId);
 
         if (plot == null)
-            return NotFound("Plot não encontrado");
+            return NotFound("Plot não encontrado.");
 
-        if (plot.Farm.UserId == thiefUserId)
-            return BadRequest("Voc\u00ea n\u00e3o pode roubar a pr\u00f3pria fazenda.");
+        if (farm.UserId == thiefUserId)
+            return BadRequest("Você não pode roubar a própria fazenda.");
 
-        var areFriends = await _friendshipService.AreFriendsAsync(
-            thiefUserId,
-            plot.Farm.UserId);
-
-        if (!areFriends)
+        if (!await _friendshipService.AreFriendsAsync(
+                thiefUserId,
+                farm.UserId))
+        {
             return Forbid();
+        }
+
+        var now = _pestService.UtcNow;
+        await _pestService.ProcessLockedFarmAsync(farm, plots, now);
 
         if (plot.SeedId == null)
-            return BadRequest("Nada plantado");
-        
-        if (!plot.IsReady)
-            return BadRequest("Plantação não está pronta");
+            return BadRequest("Nada plantado.");
+
+        if (plot.ReadyAt == null || plot.ReadyAt > now)
+            return BadRequest("Plantação não está pronta.");
+
+        if (plot.RemainingYield is not int remainingYield
+            || remainingYield < 1)
+        {
+            return YieldUnavailable();
+        }
 
         var seed = await _context.Seeds.FindAsync(plot.SeedId);
         if (seed == null)
-            return BadRequest("Seed inválida");
+            return BadRequest("Semente inválida.");
 
-        var stolenFromThisPlant = await _context.TheftLogs
-            .Where(t =>
-                t.PlotId == plot.Id &&
-                t.CreatedAt >= plot.PlantedAt
-            )
-            .SumAsync(t => t.Quantity);
-
-        // 3️⃣ Quantidade restante de yield
-        var remainingYield = Math.Max(
-            1,
-            seed.CropAmount - stolenFromThisPlant
-        );
-
-        // 4️⃣ Quanto já roubou hoje nessa farm
-        var today = DateTime.UtcNow.Date;
-
+        var today = now.Date;
         var alreadyStolenToday = await _context.TheftLogs
-            .Where(t =>
-                t.FarmId == farmId &&
-                t.ThiefUserId == thiefUserId &&
-                t.CreatedAt >= today)
-            .SumAsync(t => t.Quantity);
+            .Where(log =>
+                log.FarmId == farmId
+                && log.ThiefUserId == thiefUserId
+                && log.CreatedAt >= today)
+            .SumAsync(log => log.Quantity);
 
-        // 5️⃣ Regra do jogo
         TheftResult result;
         try
         {
             result = _theftService.Steal(
                 remainingYield,
                 thief.Level,
-                alreadyStolenToday
-            );
+                alreadyStolenToday);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException exception)
         {
-            return BadRequest(ex.Message);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+            return BadRequest(exception.Message);
         }
 
-        // Atualizar yield do plot
-        plot.RemainingYield = remainingYield - result.StolenAmount;
+        var ownerWillReceive = remainingYield - result.StolenAmount;
+        plot.RemainingYield = ownerWillReceive;
+        var pestCancelled = PestRules.CancelActiveByTheft(plot, now);
 
-        // 6️⃣ Inventário do ladrão
         var inventory = await _context.Inventories
-            .Include(i => i.Items)
-            .FirstAsync(i => i.UserId == thiefUserId);
-
-        var cropItem = inventory.Items.FirstOrDefault(i =>
-            i.ItemType == ItemType.Crop &&
-            i.ItemId == seed.CropId
-        );
+            .Include(candidate => candidate.Items)
+            .FirstAsync(candidate => candidate.UserId == thiefUserId);
+        var cropItem = inventory.Items.FirstOrDefault(item =>
+            item.ItemType == ItemType.Crop
+            && item.ItemId == seed.CropId);
 
         if (cropItem == null)
         {
@@ -137,8 +138,6 @@ public class TheftController : ControllerBase
 
         cropItem.Quantity += result.StolenAmount;
 
-        // 7️⃣ Log do roubo
-        var now = DateTime.UtcNow;
         var theftLog = new TheftLog
         {
             Id = Guid.NewGuid(),
@@ -150,18 +149,15 @@ public class TheftController : ControllerBase
             GotBonus = result.GotBonus,
             CreatedAt = now
         };
-
         _context.TheftLogs.Add(theftLog);
 
-        // 8️⃣ Notificação persistente para o dono da fazenda
         var theftMessage = result.GotBonus
-            ? $"{thief.Username} roubou {result.StolenAmount} unidades de {seed.Name.ToLower()} da sua fazenda."
-            : $"{thief.Username} roubou {result.StolenAmount} {seed.Name.ToLower()} da sua fazenda.";
-
+            ? $"{thief.Username} roubou {result.StolenAmount} unidades de {seed.Name.ToLowerInvariant()} da sua fazenda."
+            : $"{thief.Username} roubou {result.StolenAmount} {seed.Name.ToLowerInvariant()} da sua fazenda.";
         _context.Notifications.Add(new Notification
         {
             Id = Guid.NewGuid(),
-            RecipientUserId = plot.Farm.UserId,
+            RecipientUserId = farm.UserId,
             ActorUserId = thiefUserId,
             Type = NotificationType.TheftOccurred,
             Message = theftMessage,
@@ -169,24 +165,24 @@ public class TheftController : ControllerBase
             CreatedAt = now
         });
 
-        // 9️⃣ Ganho de XP por roubo
         if (result.XpGained > 0)
-        {
             _experienceService.AddXp(thief, result.XpGained);
-        }
-
-        // ⚠️ IMPORTANTE: NÃO limpamos o plot
-        // O dono ainda vai colher o restante
 
         await _context.SaveChangesAsync();
         await transaction.CommitAsync();
 
-        return Ok(new
-        {
+        return Ok(new TheftResponse(
             plot.Id,
-            stolen = result.StolenAmount,
-            ownerWillReceive = result.OwnerAmount,
-            xpGained = result.XpGained
-        });
+            result.StolenAmount,
+            ownerWillReceive,
+            result.XpGained,
+            pestCancelled));
     }
+
+    private ObjectResult YieldUnavailable() =>
+        Problem(
+            detail:
+                "O rendimento persistido deste lote está ausente ou inválido. Nenhum roubo foi concedido.",
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "Rendimento do lote indisponível");
 }

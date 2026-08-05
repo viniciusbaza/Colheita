@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using FarmAndFriends.Api.Contracts.Plots;
 using FarmAndFriends.Api.Domain.Entities;
 using FarmAndFriends.Api.Domain.Enums;
@@ -7,7 +8,6 @@ using FarmAndFriends.Api.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 
 namespace FarmAndFriends.Api.Controllers;
 
@@ -18,13 +18,16 @@ public class PlotController : ControllerBase
 {
     private readonly AppDbContext _context;
     private readonly ExperienceService _experienceService;
+    private readonly PestService _pestService;
 
     public PlotController(
         AppDbContext context,
-        ExperienceService experienceService)
+        ExperienceService experienceService,
+        PestService pestService)
     {
         _context = context;
         _experienceService = experienceService;
+        _pestService = pestService;
     }
 
     [HttpPost("{plotId}/plant")]
@@ -32,9 +35,8 @@ public class PlotController : ControllerBase
         Guid plotId,
         [FromBody] PlantSeedRequest request)
     {
-        var userId = Guid.Parse(
-            User.FindFirstValue(ClaimTypes.NameIdentifier)!
-        );
+        if (!TryGetCurrentUserId(out var userId))
+            return Unauthorized();
 
         await using var transaction =
             await _context.Database.BeginTransactionAsync();
@@ -43,67 +45,56 @@ public class PlotController : ControllerBase
         if (lockedUser == null)
             return Unauthorized();
 
-        // 1 Buscar o plot com a farm e o user
-        var plot = await _context.Plots
-            .Include(p => p.Farm)
-            .ThenInclude(f => f.User)
-            .FirstOrDefaultAsync(p => p.Id == plotId);
+        var farmId = await FindFarmIdAsync(plotId);
+        if (!farmId.HasValue)
+            return NotFound("Plot não encontrado.");
 
-        if (plot == null)
-            return NotFound("Plot não encontrado");
+        var farm = await _context.LockFarmAsync(farmId.Value);
+        var plots = await _context.LockFarmPlotsAsync(farmId.Value);
+        var plot = plots.Single(candidate => candidate.Id == plotId);
 
-        if (plot.Farm.User.Id != userId)
+        if (farm!.UserId != userId)
             return Forbid();
 
         if (!plot.Unlocked)
-            return BadRequest("Plot está bloqueado");
+            return BadRequest("Plot está bloqueado.");
 
         if (plot.SeedId != null)
-            return BadRequest("Plot já está plantado");
-        
-        // 2 Buscar a seed
-        var seed = await _context.Seeds.FirstOrDefaultAsync(s => s.Id == request.SeedId);
-        
-        if (seed == null)
-            return BadRequest("Seed inválida");
+            return BadRequest("Plot já está plantado.");
 
-        // 3️ Buscar inventário do usuário
+        var seed = await _context.Seeds
+            .FirstOrDefaultAsync(candidate => candidate.Id == request.SeedId);
+
+        if (seed == null)
+            return BadRequest("Semente inválida.");
+
         var inventory = await _context.Inventories
-            .Include(i => i.Items)
-            .FirstOrDefaultAsync(i => i.UserId == userId);
+            .Include(candidate => candidate.Items)
+            .FirstOrDefaultAsync(candidate => candidate.UserId == userId);
 
         if (inventory == null)
-            return BadRequest("Inventário não encontrado");
+            return BadRequest("Inventário não encontrado.");
 
-        // 4️ Verificar se possui a seed
-        var seedItem = inventory.Items.FirstOrDefault(i =>
-            i.ItemType == ItemType.Seed &&
-            i.ItemId == seed.Id
-        );
+        var seedItem = inventory.Items.FirstOrDefault(item =>
+            item.ItemType == ItemType.Seed
+            && item.ItemId == seed.Id);
 
         if (seedItem == null || seedItem.Quantity <= 0)
-            return BadRequest("Você não possui essa seed");
+            return BadRequest("Você não possui essa semente.");
 
-        if (seedItem.Quantity < 1)
-            return BadRequest("Você não possui essa seed");
-
-        // 5️ Consumir a seed
-        seedItem.Quantity -= 1;
-
+        seedItem.Quantity--;
         if (seedItem.Quantity == 0)
             _context.InventoryItems.Remove(seedItem);
 
-        // 6️ Plantar
-        var now = DateTime.UtcNow;
-
+        var now = _pestService.UtcNow;
         plot.SeedId = seed.Id;
         plot.PlantedAt = now;
         plot.ReadyAt = now.Add(seed.GrowTime);
         plot.RemainingYield = seed.CropAmount;
+        PestRules.ResetCycle(plot);
         CropCareRules.StartCurrentCropCycle(plot);
 
         const int xpGained = 10;
-
         _experienceService.AddXp(lockedUser, xpGained);
 
         await _context.SaveChangesAsync();
@@ -122,9 +113,8 @@ public class PlotController : ControllerBase
     [HttpPost("{plotId}/harvest")]
     public async Task<IActionResult> Harvest(Guid plotId)
     {
-        var userId = Guid.Parse(
-            User.FindFirstValue(ClaimTypes.NameIdentifier)!
-        );
+        if (!TryGetCurrentUserId(out var userId))
+            return Unauthorized();
 
         await using var transaction =
             await _context.Database.BeginTransactionAsync();
@@ -133,52 +123,48 @@ public class PlotController : ControllerBase
         if (lockedUser == null)
             return Unauthorized();
 
-        var plot = await _context.Plots
-            .Include(p => p.Farm)
-            .ThenInclude(f => f.User)
-            .FirstOrDefaultAsync(p => p.Id == plotId);
+        var farmId = await FindFarmIdAsync(plotId);
+        if (!farmId.HasValue)
+            return NotFound("Plantação não encontrada.");
 
-        if (plot == null)
-            return NotFound("Plantação não encontrada");
+        var farm = await _context.LockFarmAsync(farmId.Value);
+        var plots = await _context.LockFarmPlotsAsync(farmId.Value);
+        var plot = plots.Single(candidate => candidate.Id == plotId);
 
-        if (plot.Farm.User.Id != userId)
+        if (farm!.UserId != userId)
             return Forbid();
 
+        var now = _pestService.UtcNow;
+        await _pestService.ProcessLockedFarmAsync(farm, plots, now);
+
         if (plot.SeedId == null)
-            return BadRequest("Nenhuma plantação para colher");
+            return BadRequest("Nenhuma plantação para colher.");
 
-        if (plot.ReadyAt == null || plot.ReadyAt > DateTime.UtcNow)
-            return BadRequest("A plantação ainda não está pronta");
+        if (plot.ReadyAt == null || plot.ReadyAt > now)
+            return BadRequest("A plantação ainda não está pronta.");
 
-        // Buscar seed
+        if (plot.RemainingYield is not int finalYield
+            || finalYield < 1)
+        {
+            return YieldUnavailable();
+        }
+
         var seed = await _context.Seeds
-            .FirstOrDefaultAsync(s => s.Id == plot.SeedId);
+            .FirstOrDefaultAsync(candidate => candidate.Id == plot.SeedId);
 
         if (seed == null)
-            return BadRequest("Seed inválida");
+            return BadRequest("Semente inválida.");
 
-        // Buscar inventário
         var inventory = await _context.Inventories
-            .Include(i => i.Items)
-            .FirstOrDefaultAsync(i => i.UserId == userId);
+            .Include(candidate => candidate.Items)
+            .FirstOrDefaultAsync(candidate => candidate.UserId == userId);
 
         if (inventory == null)
-            return BadRequest("Inventário não encontrado");
+            return BadRequest("Inventário não encontrado.");
 
-        // Consulta o roubo do plot
-        var stolenAmount = await _context.TheftLogs
-            .Where(t => t.PlotId == plot.Id)
-            .SumAsync(t => t.Quantity);
-
-        // Calcular yield final
-        var baseYield = seed.CropAmount;
-        var finalYield = Math.Max(1, baseYield - stolenAmount);
-
-        // Adicionar crop ao inventário
-        var cropItem = inventory.Items.FirstOrDefault(i =>
-            i.ItemType == ItemType.Crop &&
-            i.ItemId == seed.CropId
-        );
+        var cropItem = inventory.Items.FirstOrDefault(item =>
+            item.ItemType == ItemType.Crop
+            && item.ItemId == seed.CropId);
 
         if (cropItem == null)
         {
@@ -190,7 +176,6 @@ public class PlotController : ControllerBase
                 ItemId = seed.CropId,
                 Quantity = finalYield
             };
-
             _context.InventoryItems.Add(cropItem);
         }
         else
@@ -198,14 +183,14 @@ public class PlotController : ControllerBase
             cropItem.Quantity += finalYield;
         }
 
-        // Limpa o plot
+        PestRules.CancelByHarvest(plot, now);
         plot.SeedId = null;
         plot.PlantedAt = null;
         plot.ReadyAt = null;
+        plot.RemainingYield = null;
         CropCareRules.ClearCurrentOpportunity(plot);
 
         var xpGained = 25 * seed.MinLevel;
-
         _experienceService.AddXp(lockedUser, xpGained);
 
         await _context.SaveChangesAsync();
@@ -220,4 +205,23 @@ public class PlotController : ControllerBase
             xpGained
         });
     }
+
+    private async Task<Guid?> FindFarmIdAsync(Guid plotId) =>
+        await _context.Plots
+            .AsNoTracking()
+            .Where(candidate => candidate.Id == plotId)
+            .Select(candidate => (Guid?)candidate.FarmId)
+            .SingleOrDefaultAsync();
+
+    private bool TryGetCurrentUserId(out Guid userId) =>
+        Guid.TryParse(
+            User.FindFirstValue(ClaimTypes.NameIdentifier),
+            out userId);
+
+    private ObjectResult YieldUnavailable() =>
+        Problem(
+            detail:
+                "O rendimento persistido deste lote está ausente ou inválido. Nenhuma colheita foi concedida.",
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "Rendimento do lote indisponível");
 }

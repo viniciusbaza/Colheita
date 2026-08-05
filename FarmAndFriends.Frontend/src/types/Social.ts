@@ -14,6 +14,9 @@ export const NotificationType = {
   FriendRequestDeclined: 2,
   TheftOccurred: 3,
   CropCaredFor: 4,
+  PestConsumed: 5,
+  PestRemoved: 6,
+  PestProtectionApplied: 7,
 } as const
 
 export type NotificationType =
@@ -44,6 +47,7 @@ export type SocialNotification = {
   friendshipId: string | null
   theftLogId: string | null
   careOpportunityId: string | null
+  pestPlotId: string | null
   createdAt: string
   readAt: string | null
 }

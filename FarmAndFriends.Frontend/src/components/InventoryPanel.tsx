@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useInventory } from '../inventory/useInventory'
 import { useSeeds } from '../seeds/useSeeds'
 import type { InventoryItem } from '../types/Inventory'
+import { useShopItems } from '../shop/useShopItems'
 
 type Props = {
   onClose: () => void
@@ -22,6 +23,7 @@ function filterButtonClass(active: boolean) {
 export function InventoryPanel({ onClose }: Props) {
   const { inventory, loading, refreshInventory } = useInventory()
   const { getSeedByItem } = useSeeds()
+  const { getItem } = useShopItems()
   const [filter, setFilter] = useState<InventoryFilter>('all')
 
   useEffect(() => {
@@ -47,10 +49,10 @@ export function InventoryPanel({ onClose }: Props) {
     .filter(item => filter === 'all' || item.itemType === filter)
     .sort((left, right) => {
       const leftName = left.itemType === 'Item'
-        ? left.itemId
+        ? (getItem(left.itemId)?.name ?? left.itemId)
         : (getSeedByItem(left.itemType, left.itemId)?.name ?? left.itemId)
       const rightName = right.itemType === 'Item'
-        ? right.itemId
+        ? (getItem(right.itemId)?.name ?? right.itemId)
         : (getSeedByItem(right.itemType, right.itemId)?.name ?? right.itemId)
       return leftName.localeCompare(rightName, 'pt-BR')
     })
@@ -176,7 +178,7 @@ export function InventoryPanel({ onClose }: Props) {
             <div className="grid gap-2 sm:grid-cols-2">
               {visibleItems.map(item => {
                 const catalogItem = item.itemType === 'Item'
-                  ? undefined
+                  ? getItem(item.itemId)
                   : getSeedByItem(item.itemType, item.itemId)
                 const isSeed = item.itemType === 'Seed'
                 const isCrop = item.itemType === 'Crop'
@@ -196,7 +198,7 @@ export function InventoryPanel({ onClose }: Props) {
                       }`}
                       aria-hidden="true"
                     >
-                      {isSeed ? '🌱' : isCrop ? (catalogItem?.icon ?? '🥕') : '📦'}
+                      {isSeed ? '🌱' : (catalogItem?.icon ?? (isCrop ? '🥕' : '📦'))}
                     </span>
                     <div className="min-w-0 flex-1">
                       <h3 className="truncate font-semibold">

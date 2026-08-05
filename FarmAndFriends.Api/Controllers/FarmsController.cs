@@ -1,12 +1,11 @@
+using System.Security.Claims;
+using FarmAndFriends.Api.Contracts.Farms;
+using FarmAndFriends.Api.Domain.Services;
+using FarmAndFriends.Api.Infrastructure.Data;
+using FarmAndFriends.Api.Mappers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
-using FarmAndFriends.Api.Infrastructure.Data;
-using FarmAndFriends.Api.Contracts.Farms;
-using FarmAndFriends.Api.Domain.Entities;
-using FarmAndFriends.Api.Domain.Services;
-using FarmAndFriends.Api.Mappers;
 
 namespace FarmAndFriends.Api.Controllers;
 
@@ -16,173 +15,126 @@ namespace FarmAndFriends.Api.Controllers;
 public class FarmsController : ControllerBase
 {
     private readonly AppDbContext _context;
-    private readonly FarmYieldService _farmYieldService;
     private readonly FriendshipService _friendshipService;
     private readonly CropCareService _cropCareService;
+    private readonly PestService _pestService;
 
     public FarmsController(
         AppDbContext context,
-        FarmYieldService farmYieldService,
         FriendshipService friendshipService,
-        CropCareService cropCareService)
+        CropCareService cropCareService,
+        PestService pestService)
     {
         _context = context;
-        _farmYieldService = farmYieldService;
         _friendshipService = friendshipService;
         _cropCareService = cropCareService;
+        _pestService = pestService;
     }
 
     [HttpGet("my")]
     public async Task<IActionResult> GetMyFarm()
     {
-        if (!Guid.TryParse(
-                User.FindFirstValue(ClaimTypes.NameIdentifier),
-                out var userId))
-        {
+        if (!TryGetCurrentUserId(out var userId))
             return Unauthorized();
-        }
 
-        var farm = await _context.Farms
-            .Include(f => f.User)
-            .Include(f => f.Plots)
-            .FirstOrDefaultAsync(f => f.UserId == userId);
+        var farmId = await _context.Farms
+            .AsNoTracking()
+            .Where(farm => farm.UserId == userId)
+            .Select(farm => (Guid?)farm.Id)
+            .SingleOrDefaultAsync();
 
-        if (farm == null)
-            return NotFound("Fazenda não encontrada");
+        if (!farmId.HasValue)
+            return NotFound("Fazenda não encontrada.");
 
-        var now = DateTime.UtcNow;
-
-        await _farmYieldService.PopulateRemainingYieldAsync(farm, now);
-
+        await _pestService.ProcessFarmAsync(farmId.Value);
+        var farm = await LoadFarmAsync(farmId.Value);
+        var now = _pestService.UtcNow;
         var careStates = await _cropCareService.GetFarmCareStatesAsync(
-            farm.Id,
+            farm!.Id,
             userId,
             farm.UserId,
             farm.Plots,
             now);
-        var baseResponse = FarmMapper.ToFarmResponse(
+
+        return Ok(FarmMapper.ToFarmResponse(
             farm,
             now,
-            careStates);
-
-        return Ok(new
-        {
-            id = baseResponse.Id,
-            name = farm.Name,
-            ownerUserId = farm.UserId,
-            ownerUsername = farm.User.Username,
-            plots = baseResponse.Plots.Select(p => new
-            {
-                p.Id,
-                p.X,
-                p.Y,
-                p.Unlocked,
-                p.SeedId,
-                p.PlantedAt,
-                p.IsReady,
-                p.ReadyAt,
-                p.RemainingYield,
-                p.Care
-            })
-        });
+            careStates,
+            _pestService.GetNextPestCheckAt(farm.Plots, now)));
     }
 
     [HttpGet("{farmId}")]
     public async Task<IActionResult> GetPublicFarm(Guid farmId)
     {
-        var userId = Guid.Parse(
-            User.FindFirstValue(ClaimTypes.NameIdentifier)!
-        );
+        if (!TryGetCurrentUserId(out var userId))
+            return Unauthorized();
 
-        var farm = await _context.Farms
-            .Include(f => f.Plots)
-            .Include(f => f.User)
-            .FirstOrDefaultAsync(f => f.Id == farmId);
+        var farmIdentity = await _context.Farms
+            .AsNoTracking()
+            .Where(farm => farm.Id == farmId)
+            .Select(farm => new { farm.Id, farm.UserId })
+            .SingleOrDefaultAsync();
 
-        if (farm == null)
-            return NotFound("Farm não encontrada");
+        if (farmIdentity == null)
+            return NotFound("Fazenda não encontrada.");
 
-        // ❌ Impede acessar a própria fazenda por aqui
-        if (farm.UserId == userId)
-            return BadRequest("Use /farms/my para acessar sua própria fazenda");
+        if (farmIdentity.UserId == userId)
+            return BadRequest(
+                "Use /farms/my para acessar sua própria fazenda.");
 
-        // ❌ Impede acessar fazendas de usuários que não são amigos
-        var areFriends = await _friendshipService.AreFriendsAsync(userId, farm.UserId);
-        if (!areFriends)
+        if (!await _friendshipService.AreFriendsAsync(
+                userId,
+                farmIdentity.UserId))
+        {
             return Forbid();
+        }
 
-        var now = DateTime.UtcNow;
-
-        // Populamos remainingYield
-        // ⚠️ O roubo depende disso
-        await _farmYieldService.PopulateRemainingYieldAsync(farm, now);
-
+        await _pestService.ProcessFarmAsync(farmId);
+        var farm = await LoadFarmAsync(farmId);
+        var now = _pestService.UtcNow;
         var careStates = await _cropCareService.GetFarmCareStatesAsync(
-            farm.Id,
+            farm!.Id,
             userId,
             farm.UserId,
             farm.Plots,
             now);
-        var baseResponse = FarmMapper.ToFarmResponse(
+
+        return Ok(FarmMapper.ToFarmResponse(
             farm,
             now,
-            careStates);
-
-        return Ok(new
-        {
-            baseResponse.Id,
-            farm.Name,
-            ownerUserId = farm.UserId,
-            ownerUsername = farm.User.Username,
-            plots = baseResponse.Plots.Select(p => new
-            {
-                p.Id,
-                p.X,
-                p.Y,
-                p.Unlocked,
-                p.SeedId,
-                p.PlantedAt,
-                p.IsReady,
-                p.ReadyAt,
-                p.RemainingYield,
-                p.Care
-            })
-        });
+            careStates,
+            _pestService.GetNextPestCheckAt(farm.Plots, now)));
     }
 
     [HttpGet("{farmId}/theft-log")]
     public async Task<IActionResult> GetTheftLog(Guid farmId)
     {
-        var userId = Guid.Parse(
-            User.FindFirstValue(ClaimTypes.NameIdentifier)!
-        );
+        if (!TryGetCurrentUserId(out var userId))
+            return Unauthorized();
 
-        // 1️⃣ Verifica se a farm é do usuário
         var farm = await _context.Farms
-            .Include(f => f.User)
-            .FirstOrDefaultAsync(f => f.Id == farmId);
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == farmId);
 
         if (farm == null)
-            return NotFound("Farm não encontrada");
+            return NotFound("Fazenda não encontrada.");
 
-        if (farm.User.Id != userId)
+        if (farm.UserId != userId)
             return Forbid();
 
-        // 2️⃣ Buscar logs
         var logs = await _context.TheftLogs
-            .Include(t => t.Seed)
-            .Include(t => t.ThiefUser)
-            .Where(t => t.FarmId == farmId)
-            .OrderByDescending(t => t.CreatedAt)
-            .Select(t => new TheftLogResponse(
-                t.ThiefUser.Username,
-                t.Seed.Name,
-                t.Quantity,
-                t.GotBonus,
-                t.CreatedAt
-            ))
+            .AsNoTracking()
+            .Include(log => log.Seed)
+            .Include(log => log.ThiefUser)
+            .Where(log => log.FarmId == farmId)
+            .OrderByDescending(log => log.CreatedAt)
+            .Select(log => new TheftLogResponse(
+                log.ThiefUser.Username,
+                log.Seed.Name,
+                log.Quantity,
+                log.GotBonus,
+                log.CreatedAt))
             .ToListAsync();
-
 
         return Ok(logs);
     }
@@ -190,34 +142,45 @@ public class FarmsController : ControllerBase
     [HttpGet("{farmId}/notifications")]
     public async Task<IActionResult> GetNotifications(Guid farmId)
     {
-        var userId = Guid.Parse(
-            User.FindFirstValue(ClaimTypes.NameIdentifier)!
-        );
+        if (!TryGetCurrentUserId(out var userId))
+            return Unauthorized();
 
         var farm = await _context.Farms
-            .Include(f => f.User)
-            .FirstOrDefaultAsync(f => f.Id == farmId);
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == farmId);
 
         if (farm == null)
             return NotFound();
 
-        if (farm.User.Id != userId)
+        if (farm.UserId != userId)
             return Forbid();
 
         var notifications = await _context.TheftLogs
-            .Include(t => t.ThiefUser)
-            .Include(t => t.Seed)
-            .Where(t => t.FarmId == farmId)
-            .OrderByDescending(t => t.CreatedAt)
+            .AsNoTracking()
+            .Include(log => log.ThiefUser)
+            .Include(log => log.Seed)
+            .Where(log => log.FarmId == farmId)
+            .OrderByDescending(log => log.CreatedAt)
             .Take(10)
-            .Select(t => new TheftNotificationResponse(
-                t.GotBonus
-                    ? $"{t.ThiefUser.Username} te roubou {t.Quantity} {t.Seed.Name}(s) e ganhou bônus, sortudo! ⭐"
-                    : $"{t.ThiefUser.Username} roubou {t.Quantity} {t.Seed.Name}(s)",
-                t.CreatedAt
-            ))
+            .Select(log => new TheftNotificationResponse(
+                log.GotBonus
+                    ? $"{log.ThiefUser.Username} te roubou {log.Quantity} {log.Seed.Name}(s) e ganhou bônus, sortudo! ⭐"
+                    : $"{log.ThiefUser.Username} roubou {log.Quantity} {log.Seed.Name}(s)",
+                log.CreatedAt))
             .ToListAsync();
 
         return Ok(notifications);
     }
+
+    private async Task<Domain.Entities.Farm?> LoadFarmAsync(Guid farmId) =>
+        await _context.Farms
+            .AsNoTracking()
+            .Include(farm => farm.User)
+            .Include(farm => farm.Plots)
+            .SingleOrDefaultAsync(farm => farm.Id == farmId);
+
+    private bool TryGetCurrentUserId(out Guid userId) =>
+        Guid.TryParse(
+            User.FindFirstValue(ClaimTypes.NameIdentifier),
+            out userId);
 }

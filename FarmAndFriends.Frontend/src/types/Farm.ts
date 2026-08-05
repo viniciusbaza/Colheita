@@ -8,6 +8,7 @@ export type PlotStealDone = {
   stolen: number
   remainingYield: number
   xpGained: number
+  pestCancelled: boolean
 }
 
 export type PlotStealFailed = {
@@ -22,6 +23,13 @@ export type PlotCareDone = {
   caredByUsername: string
 }
 
+export type PlotPestRemoveDone = {
+  plotId: string
+  pestOccurrenceId: string
+  coinsGained: number
+  xpGained: number
+}
+
 export type PlotHarvestDone = {
   plotId: string
   xpGained: number
@@ -32,6 +40,7 @@ export type StealResponse = {
   stolen: number
   ownerWillReceive: number
   xpGained: number
+  pestCancelled: boolean
 }
 
 export type CareResponse = {
@@ -64,6 +73,52 @@ export type HarvestResponse = {
   amount: number
   inventoryTotal: number
   xpGained: number
+}
+
+export type PestStatus =
+  | 'none'
+  | 'scheduled'
+  | 'active'
+  | 'removed'
+  | 'consumed'
+  | 'cancelledByTheft'
+  | 'cancelledByHarvest'
+  | 'cancelledByProtection'
+
+export type PlotPest = {
+  type: 'caterpillar'
+  status: PestStatus
+  scheduledAt: string | null
+  appearsAt: string | null
+  appearedAt: string | null
+  consumesAt: string | null
+  resolvedAt: string | null
+  consumedAmount: number
+  canRemove: boolean
+  occurrenceId: string | null
+}
+
+type PestMutationResponse = {
+  plotId: string
+  pest: PlotPest | null
+  status: PestStatus
+  remainingYield: number | null
+}
+
+export type PestActionResponse = PestMutationResponse & {
+  completionId: string
+  pestOccurrenceId: string
+  coinsGained: number
+  xpGained: number
+  coins: number
+  rewardGranted: boolean
+  replayed: boolean
+}
+
+export type ApplyPestProtectionResponse = PestMutationResponse & {
+  itemId: string
+  remainingItemQuantity: number
+  protectedUntil: string
 }
 
 type PlotVisualState =
@@ -103,10 +158,12 @@ export type Plot = {
   plantedAt?: string | null
   isReady: boolean
   readyAt?: string | null
-  remainingYield: number
+  remainingYield: number | null
   state: PlotVisualState
   showXp?: number
   care?: PlotCare | null
+  protectedUntil: string | null
+  pest: PlotPest | null
 }
 
 export type Farm = {
@@ -114,6 +171,7 @@ export type Farm = {
   name: string
   ownerUserId: string
   ownerUsername: string
+  nextPestCheckAt: string | null
   plots: Plot[]
 }
 

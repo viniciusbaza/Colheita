@@ -1,38 +1,75 @@
+import { useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { authFetch } from '../api/http'
 import { useFarm } from '../farm/useFarmContext'
+import {
+  confirmedPestRemovalPatch,
+  confirmedTheftPatch,
+  getPestRemovalAttempt,
+} from '../farm/farmState'
+import type { PestRemovalAttempt } from '../farm/farmState'
+import { useInventory } from '../inventory/useInventory'
+import { useSeeds } from '../seeds/useSeeds'
+import { useShopItems } from '../shop/useShopItems'
 import type {
+  ApplyPestProtectionResponse,
   CareResponse,
   HarvestResponse,
+  PestActionResponse,
   PlantResponse,
+  PlotPestRemoveDone,
   StealResponse,
 } from '../types/Farm'
-import { authFetch } from '../api/http'
-import { useInventory } from '../inventory/useInventory'
-import { useEffect, useState } from 'react'
-import { formatTimeRemaining } from '../utils/time'
-import { useSeeds } from '../seeds/useSeeds'
 import { useUser } from '../user/useUser'
+import { hasServerPestProtection } from '../utils/pests'
+import { formatCountdown, formatTimeRemaining } from '../utils/time'
+
+const NATURAL_REPELLENT_ID = 'natural_repellent'
 
 type Props = {
   plotId: string
   onClose: () => void
 }
 
+type PendingAction =
+  | 'plant'
+  | 'harvest'
+  | 'steal'
+  | 'care'
+  | 'remove-pest'
+  | 'protect'
+
+type Feedback = {
+  type: 'success' | 'error'
+  message: string
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback
+}
+
 export function PlotModal({ plotId, onClose }: Props) {
-  const { farm, refreshFarm, isVisiting, canInteract } = useFarm()
+  const {
+    farm,
+    refreshFarm,
+    patchPlot,
+    isVisiting,
+    canInteract,
+  } = useFarm()
   const { getSeed } = useSeeds()
   const { inventory, refreshInventory } = useInventory()
-  const { addXp } = useUser()
+  const { getItem } = useShopItems()
+  const { addXp, refreshUser } = useUser()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const pestRemovalAttemptRef = useRef<PestRemovalAttempt | null>(null)
 
-  const [stealError, setStealError] = useState<string | null>(null)
-  const [careError, setCareError] = useState<string | null>(null)
-  const [carePending, setCarePending] = useState(false)
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
+  const [feedback, setFeedback] = useState<Feedback | null>(null)
+  const [confirmProtection, setConfirmProtection] = useState(false)
   const [currentTime, setCurrentTime] = useState(Date.now)
 
-  const seeds = canInteract 
-  ? inventory?.items.filter(i => i.itemType === 'Seed' && i.quantity > 0) ?? []
-  : []
-
-  const plot = farm?.plots.find(p => p.id === plotId)
+  const plot = farm?.plots.find(candidate => candidate.id === plotId)
   const farmId = farm?.id
   const care = plot?.care
   const nextCareAt = care?.nextCareAt
@@ -41,11 +78,26 @@ export function PlotModal({ plotId, onClose }: Props) {
   const careOpportunityId = canCareNow
     ? care?.opportunityId ?? null
     : null
-
   const seedCatalog = getSeed(plot?.seedId ?? undefined)
+  const repellent = getItem(NATURAL_REPELLENT_ID)
+  const repellentQuantity = inventory?.items.find(
+    item => item.itemType === 'Item' && item.itemId === NATURAL_REPELLENT_ID,
+  )?.quantity ?? 0
+
   const readyAt = plot?.readyAt
+  const protectedUntil = plot?.protectedUntil
+  const isProtected = hasServerPestProtection(protectedUntil ?? null)
+  const pestConsumesAt = plot?.pest?.status === 'active'
+    ? plot.pest.consumesAt
+    : null
   const timeLeft = readyAt
     ? formatTimeRemaining(readyAt, currentTime)
+    : null
+  const pestTimeLeft = pestConsumesAt
+    ? formatCountdown(pestConsumesAt, currentTime)
+    : null
+  const protectionTimeLeft = isProtected && protectedUntil
+    ? formatCountdown(protectedUntil, currentTime)
     : null
   const nextCareAtTime = nextCareAt
     ? new Date(nextCareAt).getTime()
@@ -61,90 +113,149 @@ export function PlotModal({ plotId, onClose }: Props) {
     && careCycleEndsAtTime > currentTime
     ? formatTimeRemaining(careCycleEndsAt!, currentTime)
     : null
+  const seeds = canInteract
+    ? inventory?.items.filter(
+        item => item.itemType === 'Seed' && item.quantity > 0,
+      ) ?? []
+    : []
+  const canOfferProtection = Boolean(
+    plot?.unlocked
+      && !isProtected
+      && repellent !== undefined
+      && repellentQuantity > 0,
+  )
 
   useEffect(() => {
-    if (!readyAt && !nextCareAt && !careCycleEndsAt) return
+    if (
+      !readyAt
+      && !nextCareAt
+      && !careCycleEndsAt
+      && !pestConsumesAt
+      && !protectedUntil
+    ) {
+      return
+    }
 
     const interval = setInterval(() => setCurrentTime(Date.now()), 1000)
-
     return () => clearInterval(interval)
-  }, [careCycleEndsAt, nextCareAt, readyAt])
+  }, [
+    careCycleEndsAt,
+    nextCareAt,
+    pestConsumesAt,
+    protectedUntil,
+    readyAt,
+  ])
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement
+    closeButtonRef.current?.focus()
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape)
+      if (previouslyFocused instanceof HTMLElement) {
+        previouslyFocused.focus()
+      }
+    }
+  }, [onClose])
 
   if (!plot) return null
 
+  function keepFocusInside(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Tab') return
+
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    )
+    if (!focusable || focusable.length === 0) return
+
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
   async function handlePlant(seedId: string) {
-    if (isVisiting) return
+    if (isVisiting || pendingAction) return
+
+    setFeedback(null)
+    setPendingAction('plant')
 
     try {
-      const data = await authFetch<PlantResponse>(
-        `/plots/${plotId}/plant`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ seedId }),
-        }
-      )
+      const data = await authFetch<PlantResponse>(`/plots/${plotId}/plant`, {
+        method: 'POST',
+        body: JSON.stringify({ seedId }),
+      })
 
       window.dispatchEvent(
         new CustomEvent('plot:plant:done', {
-          detail: {
-            plotId,
-            xpGained: data.xpGained,
-          },
+          detail: { plotId, xpGained: data.xpGained },
         }),
       )
-
       addXp(data.xpGained)
-
+      await Promise.all([refreshFarm(), refreshInventory()])
       onClose()
-
-      // 🔄 sincroniza tudo
-      await Promise.all([
-        refreshFarm(),
-        refreshInventory(),
-      ])
-    } catch (err) {
-      alert((err as Error).message)
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: errorMessage(error, 'Não foi possível plantar agora.'),
+      })
+    } finally {
+      setPendingAction(null)
     }
   }
 
   async function handleHarvest() {
-    if (isVisiting) return
+    if (isVisiting || pendingAction) return
+
+    setFeedback(null)
+    setPendingAction('harvest')
 
     try {
       const data = await authFetch<HarvestResponse>(
         `/plots/${plotId}/harvest`,
-        { method: 'POST' }
+        { method: 'POST' },
       )
 
-      // Avisa o Phaser COM DADOS PRONTOS
       window.dispatchEvent(
         new CustomEvent('plot:harvest:done', {
-          detail: {
-            plotId: plotId,
-            xpGained: data.xpGained
-          }
-        })
+          detail: { plotId, xpGained: data.xpGained },
+        }),
       )
+      window.dispatchEvent(new Event('inventory:changed'))
       addXp(data.xpGained)
-
-      // Fecha o modal
+      await Promise.all([refreshFarm(), refreshInventory()])
       onClose()
-
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: errorMessage(error, 'Não foi possível colher agora.'),
+      })
       await refreshFarm()
-    } catch (err) {
-      alert((err as Error).message)
+    } finally {
+      setPendingAction(null)
     }
   }
 
   async function handleSteal() {
-    if (!isVisiting || !farmId) return
+    if (!isVisiting || !farmId || pendingAction) return
 
-    setStealError(null)
+    setFeedback(null)
+    setPendingAction('steal')
 
     try {
       const data = await authFetch<StealResponse>(
         `/farms/${farmId}/plots/${plotId}/steal`,
-        { method: 'POST' }
+        { method: 'POST' },
       )
 
       window.dispatchEvent(
@@ -153,58 +264,52 @@ export function PlotModal({ plotId, onClose }: Props) {
             plotId,
             stolen: data.stolen,
             remainingYield: data.ownerWillReceive,
-            xpGained: data.xpGained
-          }
-        })
+            xpGained: data.xpGained,
+            pestCancelled: data.pestCancelled,
+          },
+        }),
       )
-
+      patchPlot(
+        plotId,
+        currentPlot => confirmedTheftPatch(currentPlot, data),
+      )
       addXp(data.xpGained)
-
-      onClose()
       await refreshFarm()
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Erro ao roubar'
-
-      setStealError(message)
-
+      onClose()
+    } catch (error) {
+      const message = errorMessage(error, 'Erro ao roubar')
+      setFeedback({ type: 'error', message })
       window.dispatchEvent(
         new CustomEvent('plot:steal:failed', {
-          detail: {
-            plotId,
-            reason: message
-          }
-        })
+          detail: { plotId, reason: message },
+        }),
       )
+      await refreshFarm()
+    } finally {
+      setPendingAction(null)
     }
   }
 
   async function handleCare() {
     if (
-      !isVisiting ||
-      !farmId ||
-      !careOpportunityId ||
-      carePending
+      !isVisiting
+      || !farmId
+      || !careOpportunityId
+      || pendingAction
     ) {
       return
     }
 
-    setCareError(null)
-    setCarePending(true)
+    setFeedback(null)
+    setPendingAction('care')
 
     try {
       const data = await authFetch<CareResponse>(
         `/farms/${farmId}/plots/${plotId}/care`,
         {
           method: 'POST',
-          headers: {
-            'Idempotency-Key': crypto.randomUUID(),
-          },
-          body: JSON.stringify({
-            careOpportunityId,
-          }),
+          headers: { 'Idempotency-Key': crypto.randomUUID() },
+          body: JSON.stringify({ careOpportunityId }),
         },
       )
 
@@ -220,67 +325,252 @@ export function PlotModal({ plotId, onClose }: Props) {
       )
       window.dispatchEvent(new Event('inventory:changed'))
       addXp(data.xpGained)
-
-      onClose()
       await refreshFarm()
-    } catch (err) {
-      const message = err instanceof Error
-        ? err.message
-        : 'Não foi possível deixar o cuidado.'
-
-      setCareError(message)
+      onClose()
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: errorMessage(error, 'Não foi possível deixar o cuidado.'),
+      })
       await refreshFarm()
     } finally {
-      setCarePending(false)
+      setPendingAction(null)
     }
   }
 
+  async function handleRemovePest() {
+    if (!farmId || pendingAction || !plot?.pest?.canRemove) return
+
+    setFeedback(null)
+    setPendingAction('remove-pest')
+    const pestOccurrenceId = plot.pest.occurrenceId
+
+    if (pestOccurrenceId === null) {
+      setFeedback({
+        type: 'success',
+        message: '🐛 Só um instante: estamos sincronizando esta lagarta.',
+      })
+      await refreshFarm()
+      setPendingAction(null)
+      return
+    }
+
+    const attempt = getPestRemovalAttempt(
+      pestRemovalAttemptRef.current,
+      pestOccurrenceId,
+      () => crypto.randomUUID(),
+    )
+    pestRemovalAttemptRef.current = attempt
+
+    try {
+      const data = await authFetch<PestActionResponse>(
+        `/farms/${farmId}/plots/${plotId}/pest/remove`,
+        {
+          method: 'POST',
+          headers: { 'Idempotency-Key': attempt.key },
+          body: JSON.stringify({ pestOccurrenceId }),
+        },
+      )
+
+      if (pestRemovalAttemptRef.current?.key === attempt.key) {
+        pestRemovalAttemptRef.current = null
+      }
+      patchPlot(
+        plotId,
+        currentPlot => confirmedPestRemovalPatch(currentPlot, data),
+      )
+      if (!data.replayed) {
+        addXp(data.xpGained)
+      }
+
+      window.dispatchEvent(new Event('inventory:changed'))
+      await Promise.allSettled([
+        refreshFarm(),
+        refreshInventory(),
+        refreshUser(),
+      ])
+
+      if (data.replayed) {
+        setFeedback({
+          type: 'success',
+          message: '🐛 Remoção já confirmada. Resultado recuperado.',
+        })
+        return
+      }
+
+      const removeDone: PlotPestRemoveDone = {
+        plotId,
+        pestOccurrenceId: data.pestOccurrenceId,
+        coinsGained: data.coinsGained,
+        xpGained: data.xpGained,
+      }
+      onClose()
+      window.requestAnimationFrame(() => {
+        window.dispatchEvent(
+          new CustomEvent<PlotPestRemoveDone>('plot:pest:remove:done', {
+            detail: removeDone,
+          }),
+        )
+      })
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: errorMessage(error, 'Não foi possível remover a lagarta.'),
+      })
+      window.dispatchEvent(new Event('inventory:changed'))
+      await Promise.allSettled([
+        refreshFarm(),
+        refreshInventory(),
+        refreshUser(),
+      ])
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  async function handleApplyProtection() {
+    if (!farmId || pendingAction || !canOfferProtection) return
+
+    setFeedback(null)
+    setPendingAction('protect')
+
+    try {
+      const data = await authFetch<ApplyPestProtectionResponse>(
+        `/farms/${farmId}/plots/${plotId}/pest/protection`,
+        { method: 'POST' },
+      )
+      patchPlot(plotId, {
+        pest: data.pest,
+        protectedUntil: data.protectedUntil,
+        remainingYield: data.remainingYield,
+      })
+      await Promise.all([refreshFarm(), refreshInventory()])
+      window.dispatchEvent(new Event('inventory:changed'))
+      setConfirmProtection(false)
+      setFeedback({
+        type: 'success',
+        message: data.pest?.status === 'cancelledByProtection'
+          ? `🛡️ ${repellent?.name ?? 'Repelente Natural'} aplicado: a lagarta foi espantada.`
+          : `🛡️ ${repellent?.name ?? 'Repelente Natural'} aplicado ao lote.`,
+      })
+      setCurrentTime(Date.now())
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: errorMessage(error, 'Não foi possível proteger este lote.'),
+      })
+      await Promise.all([refreshFarm(), refreshInventory()])
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  const actionBusy = pendingAction !== null
+  const activePest = plot.pest?.status === 'active'
+
   return (
-    <div className="plot-modal" onPointerDown={(e) => e.stopPropagation()}>
-      
-      {!plot.unlocked && <p className="text-red-600 text-sm">🔒 Terreno bloqueado</p>}
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="plot-modal-title"
+      className="plot-modal w-72 max-w-[calc(100vw-2rem)]"
+      onPointerDown={event => event.stopPropagation()}
+      onKeyDown={keepFocusInside}
+    >
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <h2 id="plot-modal-title" className="font-bold text-emerald-900">
+          Detalhes do lote ({plot.x + 1},{plot.y + 1})
+        </h2>
+        <button
+          ref={closeButtonRef}
+          type="button"
+          onClick={onClose}
+          className="-mr-1 -mt-1 rounded-full px-2 py-1 text-lg leading-none text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+          aria-label="Fechar detalhes do lote"
+        >
+          ×
+        </button>
+      </div>
+
+      {!plot.unlocked && (
+        <p className="text-sm text-red-600">🔒 Terreno bloqueado</p>
+      )}
+
+      {isProtected && protectionTimeLeft && (
+        <div className="mb-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800">
+          🛡️ Protegido contra pragas por {protectionTimeLeft}
+        </div>
+      )}
 
       {canInteract && plot.unlocked && !plot.seedId && (
         <>
-          <p className='font-semibold mb-2'>🌱 Plantar:</p>
+          <p className="mb-2 font-semibold">🌱 Plantar:</p>
           {seeds.length === 0 && (
-            <p className="text-gray-500 text-sm">
-              Você não tem sementes.
-            </p>
+            <p className="text-sm text-gray-500">Você não tem sementes.</p>
           )}
-          <div className="flex gap-2 flex-wrap">
-            {seeds?.map(seed => (
+          <div className="flex flex-wrap gap-2">
+            {seeds.map(seed => (
               <button
                 key={seed.itemId}
-                className="px-3 py-1 rounded-lg
-                bg-green-100 hover:bg-green-200
-                border text-sm"
-                onClick={() => handlePlant(seed.itemId)}
+                type="button"
+                className="rounded-lg border bg-green-100 px-3 py-1 text-sm hover:bg-green-200 disabled:cursor-wait disabled:opacity-60"
+                onClick={() => void handlePlant(seed.itemId)}
+                disabled={actionBusy}
               >
-                🌱 {getSeed(seed.itemId)?.name} x{seed.quantity}
+                🌱 {getSeed(seed.itemId)?.name} ×{seed.quantity}
               </button>
             ))}
-          </div>  
+          </div>
         </>
       )}
 
-      {isVisiting && plot.unlocked && !plot.seedId && (
-        <p className="text-sm text-gray-500">
-          ❌ Nada pra fazer aqui.
-        </p>
+      {isVisiting && plot.unlocked && !plot.seedId && !canOfferProtection && (
+        <p className="text-sm text-gray-500">Este lote está vazio.</p>
       )}
 
       {plot.seedId && seedCatalog && (
         <>
-          <p className="text-xs">{seedCatalog.icon} {seedCatalog.name}</p>
+          <p className="mb-2 text-xs">{seedCatalog.icon} {seedCatalog.name}</p>
+          {activePest && (
+            <section
+              aria-label="Lagarta ativa"
+              className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2"
+            >
+              <p className="font-bold text-amber-900">🐛 Lagarta encontrada!</p>
+              <p className="mt-1 text-sm text-amber-800">
+                Ela comerá a produção
+                {pestTimeLeft ? ` em ${pestTimeLeft}` : ''}.
+              </p>
+              {plot.pest?.canRemove && (
+                <button
+                  type="button"
+                  className="mt-2 w-full rounded-lg border border-amber-400 bg-white px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                  onClick={() => void handleRemovePest()}
+                  disabled={actionBusy}
+                >
+                  {pendingAction === 'remove-pest'
+                    ? 'Removendo...'
+                    : 'Remover lagarta'}
+                </button>
+              )}
+            </section>
+          )}
+
+          {plot.pest?.status === 'consumed' && (
+            <p className="mb-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+              Uma lagarta comeu {plot.pest.consumedAmount ?? 1} {' '}
+              {(seedCatalog?.name ?? 'sua cultura').toLocaleLowerCase('pt-BR')}.
+            </p>
+          )}
+
           {!isVisiting && (plot.care?.caregiverCount ?? 0) > 0 && (
             <p className="mt-1 text-xs font-semibold text-sky-700">
               💧 Regada por{' '}
               {plot.care!.caregivers
                 .map(caregiver => caregiver.username)
                 .join(', ')}
-              {plot.care!.caregiverCount
-                > plot.care!.caregivers.length
+              {plot.care!.caregiverCount > plot.care!.caregivers.length
                 ? ` e +${plot.care!.caregiverCount
                     - plot.care!.caregivers.length}`
                 : ''}
@@ -290,47 +580,56 @@ export function PlotModal({ plotId, onClose }: Props) {
             && plot.care?.viewerCared
             && !canCareNow
             && careTimeLeft && (
-            <p className="mt-1 text-xs font-semibold text-sky-700">
-              💧 Regue novamente em {careTimeLeft}.
-            </p>
-          )}
+              <p className="mt-1 text-xs font-semibold text-sky-700">
+                💧 Regue novamente em {careTimeLeft}.
+              </p>
+            )}
           {isVisiting
             && canCareNow
             && plot.care?.rewardAvailable === false
             && careCycleTimeLeft && (
-            <p className="mt-1 max-w-52 text-[11px] leading-snug text-amber-700">
-              💧 Você regou recentemente. Regue novamente em {careCycleTimeLeft}.
-            </p>
-          )}
+              <p className="mt-1 max-w-52 text-[11px] leading-snug text-amber-700">
+                💧 Você regou recentemente. Regue novamente em {careCycleTimeLeft}.
+              </p>
+            )}
+
           <div className="plot-actions">
             {plot.isReady ? (
               isVisiting ? (
-                <div
+                <button
+                  type="button"
                   className="plot-action steal"
-                  onClick={handleSteal}
-                >😈 Roubar
-                </div>
+                  onClick={() => void handleSteal()}
+                  disabled={actionBusy}
+                >
+                  {pendingAction === 'steal' ? 'Roubando...' : '😈 Roubar'}
+                </button>
               ) : (
-                <div 
-                  className='plot-action harvest'
-                  onClick={handleHarvest}
-                >✂️ Colher
-                </div>
+                <button
+                  type="button"
+                  className="plot-action harvest"
+                  onClick={() => void handleHarvest()}
+                  disabled={actionBusy}
+                >
+                  {pendingAction === 'harvest' ? 'Colhendo...' : '✂️ Colher'}
+                </button>
               )
             ) : (
               <>
-                {isVisiting && canCareNow && plot.care?.rewardAvailable === true && (
-                  <button
-                    type="button"
-                    className="plot-action care"
-                    onClick={() => void handleCare()}
-                    disabled={carePending}
-                  >
-                    {carePending ? '💧 Regando...' : '💧 Regar'}
-                  </button>
-                )}
+                {isVisiting
+                  && canCareNow
+                  && plot.care?.rewardAvailable === true && (
+                    <button
+                      type="button"
+                      className="plot-action care"
+                      onClick={() => void handleCare()}
+                      disabled={actionBusy}
+                    >
+                      {pendingAction === 'care' ? '💧 Regando...' : '💧 Regar'}
+                    </button>
+                  )}
                 <div className="plot-action disabled">
-                  ⏳ {`Pronto em ${timeLeft}`}
+                  ⏳ Pronto em {timeLeft}
                 </div>
               </>
             )}
@@ -338,22 +637,61 @@ export function PlotModal({ plotId, onClose }: Props) {
         </>
       )}
 
-      {careError && (
-        <div className="
-          mt-2 rounded-lg border border-sky-200
-          bg-sky-50 px-3 py-2 text-sm text-sky-800
-        ">
-          💧 {careError}
-        </div>
+      {canOfferProtection && (
+        <section className="mt-3 border-t border-slate-200 pt-3">
+          {!confirmProtection ? (
+            <button
+              type="button"
+              className="w-full rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800 hover:bg-sky-100 disabled:opacity-60"
+              onClick={() => setConfirmProtection(true)}
+              disabled={actionBusy}
+            >
+              🛡️ Aplicar {repellent?.name ?? 'Repelente Natural'} ({repellentQuantity})
+            </button>
+          ) : (
+            <div className="rounded-lg border border-sky-300 bg-sky-50 p-2">
+              <p className="text-sm text-sky-900">
+                Usar 1 {repellent?.name ?? 'Repelente Natural'} neste lote?
+              </p>
+              {isVisiting && (
+                <p className="mt-1 text-xs text-sky-700">
+                  O item sairá do seu inventário e protegerá a fazenda visitada.
+                </p>
+              )}
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  className="flex-1 rounded-md bg-sky-700 px-2 py-1.5 text-sm font-semibold text-white hover:bg-sky-800 disabled:cursor-wait disabled:opacity-60"
+                  onClick={() => void handleApplyProtection()}
+                  disabled={actionBusy}
+                >
+                  {pendingAction === 'protect' ? 'Aplicando...' : 'Confirmar'}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-sky-300 bg-white px-2 py-1.5 text-sm text-sky-800 hover:bg-sky-100 disabled:opacity-60"
+                  onClick={() => setConfirmProtection(false)}
+                  disabled={actionBusy}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
       )}
 
-      {stealError && (
-        <div className="
-          mt-2 px-3 py-2 rounded-lg
-          bg-red-100 border border-red-300
-          text-sm text-red-700
-        ">
-          🚫 {stealError}
+      {feedback && (
+        <div
+          role={feedback.type === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+          className={`mt-2 rounded-lg border px-3 py-2 text-sm ${
+            feedback.type === 'error'
+              ? 'border-red-300 bg-red-100 text-red-700'
+              : 'border-emerald-300 bg-emerald-50 text-emerald-800'
+          }`}
+        >
+          {feedback.message}
         </div>
       )}
     </div>

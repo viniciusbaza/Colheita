@@ -1,5 +1,7 @@
 using FarmAndFriends.Api.Contracts.Farms;
+using FarmAndFriends.Api.Contracts.Pests;
 using FarmAndFriends.Api.Domain.Entities;
+using FarmAndFriends.Api.Domain.Rules;
 using FarmAndFriends.Api.Domain.Services;
 
 namespace FarmAndFriends.Api.Mappers;
@@ -9,7 +11,8 @@ public static class FarmMapper
     public static FarmResponse ToFarmResponse(
         Farm farm,
         DateTime now,
-        IReadOnlyDictionary<Guid, PlotCropCareState> careStates)
+        IReadOnlyDictionary<Guid, PlotCropCareState> careStates,
+        DateTime? nextPestCheckAt = null)
     {
         return new FarmResponse(
             farm.Id,
@@ -25,7 +28,8 @@ public static class FarmMapper
                     careStates.TryGetValue(p.Id, out var careState)
                         ? careState
                         : null))
-                .ToList()
+                .ToList(),
+            nextPestCheckAt
         );
     }
 
@@ -46,8 +50,22 @@ public static class FarmMapper
             isReady,
             p.ReadyAt,
             isReady ? p.RemainingYield : null,
+            PestRules.IsProtected(p, now) ? p.ProtectedUntil : null,
+            ToPlotPestResponse(p),
             ToPlotCareResponse(careState)
         );
+    }
+
+    private static PestStateResponse? ToPlotPestResponse(Plot plot)
+    {
+        if (plot.SeedId == null
+            || plot.PestStatus == Domain.Enums.PestStatus.None
+            || !plot.PestType.HasValue)
+        {
+            return null;
+        }
+
+        return PestService.ToContractPest(plot);
     }
 
     private static PlotCareResponse? ToPlotCareResponse(

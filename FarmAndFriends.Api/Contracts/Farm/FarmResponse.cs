@@ -1,3 +1,5 @@
+using FarmAndFriends.Api.Contracts.Pests;
+
 namespace FarmAndFriends.Api.Contracts.Farms;
 
 public record FarmResponse(
@@ -5,7 +7,8 @@ public record FarmResponse(
     string Name,
     Guid OwnerUserId,
     string OwnerUsername,
-    List<PlotResponse> Plots
+    List<PlotResponse> Plots,
+    DateTime? NextPestCheckAt
 );
 
 public record PlotResponse(
@@ -18,6 +21,8 @@ public record PlotResponse(
     bool IsReady,
     DateTime? ReadyAt,
     int? RemainingYield,
+    DateTime? ProtectedUntil,
+    PestStateResponse? Pest,
     PlotCareResponse? Care
 );
 

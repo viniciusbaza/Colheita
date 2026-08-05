@@ -201,11 +201,15 @@ Examples include:
 
 * experience granting;
 * theft resolution;
-* crop care resolution;
-* farm yield population.
+* plot care resolution;
+* pest scheduling, deadline processing, protection and resolution.
 
 Services must preserve domain invariants and should not duplicate the same rule
 across multiple controllers.
+
+`Plot.RemainingYield` is the persisted source of truth for current production.
+It must not be reconstructed from theft logs during farm loading or harvest.
+`TheftLog` remains an audit and theft-limit ledger.
 
 ## Persistence
 
@@ -234,7 +238,7 @@ The following operations may require transactions or concurrency protection:
 * selling;
 * granting rewards;
 * reducing RemainingYield;
-* future pest damage;
+* pest scheduling, consumption, removal and protection;
 * future reward claims.
 
 The system must prevent:
@@ -542,6 +546,185 @@ The current runtime values are bound from the `CropCare` section of
 Property initializers in `CropCareOptions` are fallback values. The bound
 runtime configuration above is the source for the currently documented
 experiment.
+
+## Pest contract, time and concurrency
+
+The pest prototype is exposed through server-authoritative farm projections
+and mutations:
+
+```text
+GET  /farms/my
+GET  /farms/{farmId}
+POST /farms/{farmId}/plots/{plotId}/pest/remove
+POST /farms/{farmId}/plots/{plotId}/pest/protection
+GET  /shop/items
+POST /shop/buy-item
+```
+
+Manual removal requires both a UUID `Idempotency-Key` request header and the
+occurrence observed by the player:
+
+```json
+{
+  "pestOccurrenceId": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+Under the actor, farm and plot locks, the backend requires this value to match
+the occurrence being removed. A delayed request can therefore never resolve a
+new caterpillar that later appeared on the same plot.
+
+The response keeps the authoritative plot fields and adds:
+
+```text
+completionId
+pestOccurrenceId
+coinsGained
+xpGained
+coins
+rewardGranted
+replayed
+```
+
+`replayed` lets React reconcile a retry without incrementing shared XP or
+replaying the reward animation. A retry is matched to the completion by actor,
+key, target and requested occurrence; it remains reproducible after the plot
+has moved to another planting cycle. The protection response remains a
+separate contract and does not expose reward fields.
+
+Farm plot responses add:
+
+* `protectedUntil`;
+* a nullable `pest` projection containing `occurrenceId`, `type`, `status`,
+  scheduling,
+  appearance, consumption and resolution timestamps, `consumedAmount` and
+  `canRemove`.
+
+Farm responses also add `nextPestCheckAt`. This is the server-computed
+`ReadyAt + SafetyPeriod` deadline for the next crop that still needs its first
+pest evaluation. React schedules a refresh after this deadline instead of
+duplicating the safety-period rule.
+
+The persisted status lifecycle is:
+
+```text
+None
+→ Scheduled
+→ Active
+→ Removed | Consumed | CancelledByTheft
+           | CancelledByHarvest | CancelledByProtection
+```
+
+One status other than `None` is also the one-infestation marker for the current
+planting cycle. `PestOccurrenceId` provides stable correlation for that
+infestation until the next planting resets the pest-cycle fields. Planting
+preserves `ProtectedUntil`.
+
+`PestService` captures one UTC time per operation and lazily materializes
+elapsed state while loading a farm or before theft, harvest, removal or
+protection. A late first observation starts a full reaction window at actual
+activation; an already persisted and expired active infestation consumes at
+most once.
+
+The backend serializes mutations with PostgreSQL row locks in this order:
+
+```text
+actor User, when actor economy changes
+→ Farm
+→ all Farm plots ordered by Id
+→ Inventory and InventoryItem
+→ SaveChanges and commit
+```
+
+Farm-wide locking is intentional for the MVP because the active cap and minimum
+appearance interval are farm-level invariants. It also serializes theft,
+harvest and pest consumption against the same authoritative RemainingYield.
+
+Theft keeps `Scheduled` unchanged and cancels only `Active`. Harvest first
+processes an elapsed active deadline, then cancels any still-pending
+infestation. Applying protection also processes elapsed state before debiting
+the actor's item, so protection does not retroactively undo damage.
+
+Theft returns an explicit `pestCancelled` boolean. React and Phaser may show
+the caterpillar-scared feedback only from this confirmed result; the presence
+of a local sprite is not an authorization or transition decision.
+
+Manual removal also changes the actor economy and therefore always begins by
+locking the actor. In the same transaction it transitions the active
+occurrence, credits the inventory and XP, creates the owner notification when
+applicable and inserts one `PestRemovalCompletion`. The completion is unique
+by pest occurrence and by `ActorUserId + IdempotencyKey`.
+
+The rolling reward limit counts only completions with positive gains whose
+`RemovedAt` falls inside the configured window. A completion with zero gains
+is still persisted after the limit, so the crop can always be helped without
+extending the reward window.
+
+React includes ready, care, pest and protection deadlines when scheduling the
+next server refresh and retains fallback polling. It may format countdowns but
+does not confirm a transition locally.
+
+Successful remove, protection and theft responses patch only the fields
+explicitly confirmed by the backend and immediately emit `farm:sync`; the next
+farm GET remains the full reconciliation. Farm requests use a monotonic
+sequence so an older response or a response from a previous visit cannot
+overwrite newer state.
+
+Phaser creates the caterpillar only for server-returned `Active`, shows a
+small animated glyph without obscuring the crop, and updates yield feedback
+from the next `farm:sync`. Protection is described in `PlotModal`; it does not
+add a second floating plot badge. A confirmed `plot:pest:remove:done` event
+carries `pestOccurrenceId` and backend-returned reward values from React to
+Phaser. The occurrence correlation prevents a late retry from hiding a newer
+caterpillar. React emits this world-feedback event only for a new completion,
+after closing the plot modal; an idempotent replay only reconciles shared state
+and displays a synchronization message. Phaser never calls the pest endpoint
+or calculates a reward.
+
+Runtime values are bound from `Pests` in
+`FarmAndFriends.Api/appsettings.json`:
+
+| Setting | Initial value | Definition |
+| ------- | ------------: | ---------- |
+| `Enabled` | `false` | Fail-closed kill switch in the base configuration |
+| `SafetyPeriodMinutes` | 1 | Delay after crop readiness in the current development prototype |
+| `ReactionWindowMinutes` | 5 | Full window after actual appearance in the current development prototype |
+| `DamageAmount` | 1 | Maximum units consumed by the MVP caterpillar |
+| `MaxActivePestsPerFarm` | 9 | Concurrent active cap |
+| `MinimumInfestationIntervalMinutes` | 1 | Minimum interval between appearances |
+| `ProtectionDurationHours` | 4 | Protection applied by one item |
+| `NaturalRepellentBuyPrice` | 30 | Standard-currency catalog price |
+| `NaturalRepellentMinLevel` | 1 | Minimum purchase level |
+| `RemovalCoinsReward` | 2 | Standard coins for a rewarded manual removal |
+| `RemovalXpReward` | 5 | XP for a rewarded manual removal |
+| `RemovalRewardRollingWindowHours` | 24 | Rolling actor reward window |
+| `MaxRewardedRemovalsPerWindow` | 15 | Global rewarded removals per actor and window |
+
+`appsettings.Development.json` overrides `Enabled` to `true`. When the switch
+is off, the backend does not schedule, activate or consume pests and does not
+expose, sell or apply the repellent. Manual removal remains available so an
+already-active state can still be resolved safely, but creates a zero-gain
+completion while the switch is off.
+
+Pest action failures use RFC 7807 `ProblemDetails` with stable codes:
+
+```text
+PEST_FEATURE_DISABLED
+PEST_FARM_NOT_FOUND
+PEST_PLOT_NOT_FOUND
+PEST_FORBIDDEN
+PEST_NOT_ACTIVE
+PEST_ALREADY_PROTECTED
+PEST_INVENTORY_NOT_FOUND
+PEST_ITEM_UNAVAILABLE
+PEST_IDEMPOTENCY_KEY_REQUIRED
+PEST_IDEMPOTENCY_KEY_REUSED
+PEST_OCCURRENCE_ID_REQUIRED
+PEST_OCCURRENCE_MISMATCH
+```
+
+The storage decision and authoritative-yield rationale are recorded in
+`docs/decisions/ADR-0002-pest-state-and-remaining-yield.md`.
 
 ## Farm session
 

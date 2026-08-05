@@ -22,6 +22,7 @@ public class Notification
     public TheftLog? TheftLog { get; set; }
 
     public Guid? CareOpportunityId { get; set; }
+    public Guid? PestPlotId { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ReadAt { get; set; }
