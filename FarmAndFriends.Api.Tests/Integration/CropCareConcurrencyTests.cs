@@ -1523,7 +1523,7 @@ public sealed class CropCareConcurrencyTests
 
     [PostgresFact]
     [Trait("Category", "Postgres")]
-    public async Task CareAndSellCrop_PreserveCoinsAndBothXpAwards()
+    public async Task CareAndSellCrop_PreserveCoinsAndCareXpAward()
     {
         var connectionString =
             Environment.GetEnvironmentVariable("CROP_CARE_TEST_CONNECTION")!;
@@ -1627,9 +1627,9 @@ public sealed class CropCareConcurrencyTests
 
         Assert.Equal(122, inventory.Coins);
         Assert.Equal(2, user.Level);
-        Assert.Equal(6, user.CurrentXp);
+        Assert.Equal(4, user.CurrentXp);
         Assert.Equal(2, completion.CoinsGained);
-        Assert.Equal(2, completion.XpGained);
+        Assert.Equal(5, completion.XpGained);
         Assert.True(cycle.RewardGranted);
         Assert.False(
             await assertContext.InventoryItems.AnyAsync(item =>
@@ -1675,7 +1675,6 @@ public sealed class CropCareConcurrencyTests
     {
         return new ShopController(
             context,
-            new ExperienceService(),
             Options.Create(new PestOptions()))
         {
             ControllerContext = new ControllerContext

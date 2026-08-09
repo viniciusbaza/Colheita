@@ -1,7 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Seed } from '../types/Farm'
 import type { Inventory } from '../types/Inventory'
-import { MAX_SHOP_QUANTITY, useShop } from './useShop'
+import {
+  getDefaultSellQuantity,
+  getSellActionLabel,
+  isSellQuantityLimited,
+  parseSellQuantity,
+} from './sellQuantity'
+import { MAX_SHOP_QUANTITY } from './shopLimits'
+import { useShop } from './useShop'
 
 type Props = {
   seeds: Seed[]
@@ -20,17 +27,6 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Erro ao vender a colheita.'
 }
 
-function normalizeQuantity(value: string, available: number) {
-  const parsed = Number(value)
-
-  if (!Number.isFinite(parsed)) return 1
-  return Math.min(
-    available,
-    MAX_SHOP_QUANTITY,
-    Math.max(1, Math.floor(parsed)),
-  )
-}
-
 export function ShopSellTab({
   seeds,
   loadingSeeds,
@@ -42,8 +38,13 @@ export function ShopSellTab({
   onError,
 }: Props) {
   const { sellCrop } = useShop()
-  const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const [quantityOverrides, setQuantityOverrides] = useState<Record<string, string>>({})
   const [busyCropId, setBusyCropId] = useState<string | null>(null)
+  const [pendingInventory, setPendingInventory] = useState<{
+    cropId: string
+    previousInventory: Inventory
+  } | null>(null)
+  const busyCropIdRef = useRef<string | null>(null)
 
   const crops = (inventory?.items ?? []).filter(
     item => item.itemType === 'Crop' && item.quantity > 0,
@@ -53,8 +54,22 @@ export function ShopSellTab({
     return seeds.find(seed => seed.cropId === cropId)
   }
 
+  useEffect(() => {
+    if (!pendingInventory || inventory === pendingInventory.previousInventory) {
+      return
+    }
+
+    if (busyCropIdRef.current === pendingInventory.cropId) {
+      busyCropIdRef.current = null
+    }
+    setBusyCropId(current => (
+      current === pendingInventory.cropId ? null : current
+    ))
+    setPendingInventory(null)
+  }, [inventory, pendingInventory])
+
   async function handleSell(cropId: string, quantity: number) {
-    if (busyCropId) return
+    if (busyCropIdRef.current || !inventory) return
 
     const seed = getSeedByCrop(cropId)
     if (!seed) {
@@ -62,17 +77,33 @@ export function ShopSellTab({
       return
     }
 
+    busyCropIdRef.current = cropId
     setBusyCropId(cropId)
+    let awaitingInventory = false
 
     try {
-      await sellCrop(cropId, quantity)
-      onSuccess(`🪙 Você vendeu ${quantity} unidade(s) de ${seed.name}.`)
-      setQuantities(current => ({ ...current, [cropId]: 1 }))
+      const response = await sellCrop(cropId, quantity)
+      onSuccess(
+        `🪙 Você vendeu ${numberFormatter.format(response.sold)} unidade(s) de ${seed.name} e recebeu ${numberFormatter.format(response.earned)} moedas.`,
+      )
+      setQuantityOverrides(current => {
+        const next = { ...current }
+        delete next[cropId]
+        return next
+      })
+      setPendingInventory({
+        cropId,
+        previousInventory: inventory,
+      })
+      awaitingInventory = true
       window.dispatchEvent(new Event('inventory:changed'))
     } catch (error) {
       onError(getErrorMessage(error))
     } finally {
-      setBusyCropId(null)
+      if (!awaitingInventory) {
+        busyCropIdRef.current = null
+        setBusyCropId(null)
+      }
     }
   }
 
@@ -122,15 +153,19 @@ export function ShopSellTab({
   }
 
   return (
-    <div className="grid gap-3 md:grid-cols-2">
+    <div className="grid gap-2 md:grid-cols-2">
       {crops.map(crop => {
         const seed = getSeedByCrop(crop.itemId)
-        const quantity = Math.min(
-          Math.min(crop.quantity, MAX_SHOP_QUANTITY),
-          quantities[crop.itemId] ?? 1,
+        const inputValue = quantityOverrides[crop.itemId]
+          ?? String(getDefaultSellQuantity(crop.quantity))
+        const quantity = parseSellQuantity(
+          inputValue,
+          crop.quantity,
         )
-        const totalCoins = (seed?.sellPrice ?? 0) * quantity
+        const totalCoins = (seed?.sellPrice ?? 0) * (quantity ?? 0)
         const isBusy = busyCropId === crop.itemId
+        const quantityLimited = isSellQuantityLimited(crop.quantity)
+        const actionLabel = getSellActionLabel(quantity, crop.quantity)
 
         return (
           <article
@@ -167,15 +202,13 @@ export function ShopSellTab({
                   min={1}
                   max={Math.min(crop.quantity, MAX_SHOP_QUANTITY)}
                   step={1}
-                  value={quantity}
-                  onChange={event => setQuantities(current => ({
+                  value={inputValue}
+                  onChange={event => setQuantityOverrides(current => ({
                     ...current,
-                    [crop.itemId]: normalizeQuantity(
-                      event.target.value,
-                      crop.quantity,
-                    ),
+                    [crop.itemId]: event.target.value,
                   }))}
                   disabled={isBusy}
+                  aria-invalid={quantity === null}
                   aria-label={`Quantidade de ${seed?.name ?? 'colheita'} para vender`}
                   className="mt-1 w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-base text-emerald-950 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 disabled:opacity-60"
                 />
@@ -188,15 +221,34 @@ export function ShopSellTab({
               </div>
             </div>
 
+            {quantity === null && (
+              <p className="mt-1 text-xs font-semibold text-red-700">
+                Informe uma quantidade entre 1 e {numberFormatter.format(
+                  getDefaultSellQuantity(crop.quantity),
+                )}.
+              </p>
+            )}
+
+            {quantityLimited && (
+              <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                Limite de {numberFormatter.format(MAX_SHOP_QUANTITY)} unidades por venda.
+                O restante continuará no estoque.
+              </p>
+            )}
+
             <button
               type="button"
-              onClick={() => void handleSell(crop.itemId, quantity)}
-              disabled={!seed || busyCropId !== null}
+              onClick={() => {
+                if (quantity !== null) void handleSell(crop.itemId, quantity)
+              }}
+              disabled={!seed || quantity === null || busyCropId !== null}
               className="mt-3 rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-amber-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
             >
               {isBusy
-                ? 'Vendendo...'
-                : `Vender · ${numberFormatter.format(totalCoins)} 🪙`}
+                ? pendingInventory?.cropId === crop.itemId
+                  ? 'Atualizando estoque...'
+                  : 'Vendendo...'
+                : `${actionLabel} · ${numberFormatter.format(totalCoins)} 🪙`}
             </button>
           </article>
         )

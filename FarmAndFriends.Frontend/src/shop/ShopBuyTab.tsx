@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { Seed } from '../types/Farm'
 import type { ShopItem } from '../types/Shop'
-import { MAX_SHOP_QUANTITY, useShop } from './useShop'
+import { MAX_SHOP_QUANTITY } from './shopLimits'
+import { useShop } from './useShop'
 
 type Props = {
   seeds: Seed[]
@@ -20,6 +21,8 @@ type Props = {
 }
 
 const numberFormatter = new Intl.NumberFormat('pt-BR')
+
+type BuyCategory = 'seeds' | 'items'
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Erro ao comprar sementes.'
@@ -48,17 +51,18 @@ export function ShopBuyTab({
   onError,
 }: Props) {
   const { buyItem, buySeed } = useShop()
+  const [category, setCategory] = useState<BuyCategory>('seeds')
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [busyProductId, setBusyProductId] = useState<string | null>(null)
 
-  function getQuantity(seedId: string) {
-    return quantities[seedId] ?? 1
+  function getQuantity(productKey: string) {
+    return quantities[productKey] ?? 1
   }
 
-  function setQuantity(seedId: string, value: string) {
+  function setQuantity(productKey: string, value: string) {
     setQuantities(current => ({
       ...current,
-      [seedId]: normalizeQuantity(value),
+      [productKey]: normalizeQuantity(value),
     }))
   }
 
@@ -71,12 +75,13 @@ export function ShopBuyTab({
       return
     }
 
-    setBusyProductId(seedId)
+    const productKey = `seed:${seedId}`
+    setBusyProductId(productKey)
 
     try {
       await buySeed(seedId, quantity)
       onSuccess(`🌱 Você comprou ${quantity} semente(s) de ${seed.name}.`)
-      setQuantities(current => ({ ...current, [seedId]: 1 }))
+      setQuantities(current => ({ ...current, [productKey]: 1 }))
       window.dispatchEvent(new Event('inventory:changed'))
     } catch (error) {
       onError(getErrorMessage(error))
@@ -88,12 +93,13 @@ export function ShopBuyTab({
   async function handleBuyItem(item: ShopItem, quantity: number) {
     if (busyProductId) return
 
-    setBusyProductId(item.id)
+    const productKey = `item:${item.id}`
+    setBusyProductId(productKey)
 
     try {
       await buyItem(item.id, quantity)
       onSuccess(`🛡️ Você comprou ${quantity} ${item.name}.`)
-      setQuantities(current => ({ ...current, [item.id]: 1 }))
+      setQuantities(current => ({ ...current, [productKey]: 1 }))
       window.dispatchEvent(new Event('inventory:changed'))
     } catch (error) {
       onError(
@@ -106,50 +112,89 @@ export function ShopBuyTab({
     }
   }
 
-  if (loadingSeeds || loadingItems) {
-    return (
-      <div className="flex h-56 items-center justify-center text-sm text-emerald-700">
-        Carregando catálogo da loja...
-      </div>
-    )
-  }
-
-  const catalogError = seedsError ?? itemsError
-  if (catalogError && seeds.length === 0 && items.length === 0) {
-    return (
-      <div className="py-12 text-center text-red-700">
-        <p className="text-4xl">🌾</p>
-        <p className="mt-3 font-semibold">Não foi possível carregar o catálogo.</p>
-        <p className="mt-1 text-sm">{catalogError}</p>
+  return (
+    <div>
+      <nav
+        aria-label="Categorias de compra"
+        className="mb-2 grid grid-cols-2 gap-1 rounded-xl bg-emerald-100 p-1"
+      >
         <button
           type="button"
-          onClick={() => void Promise.all([refreshSeeds(), refreshItems()])}
-          className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          onClick={() => setCategory('seeds')}
+          aria-pressed={category === 'seeds'}
+          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+            category === 'seeds'
+              ? 'bg-white text-emerald-800 shadow-sm'
+              : 'text-emerald-700 hover:bg-white/60'
+          }`}
         >
-          Tentar novamente
+          Sementes
         </button>
-      </div>
-    )
-  }
+        <button
+          type="button"
+          onClick={() => setCategory('items')}
+          aria-pressed={category === 'items'}
+          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+            category === 'items'
+              ? 'bg-white text-emerald-800 shadow-sm'
+              : 'text-emerald-700 hover:bg-white/60'
+          }`}
+        >
+          Outros
+        </button>
+      </nav>
 
-  if (seeds.length === 0 && items.length === 0) {
-    return (
-      <div className="py-12 text-center text-emerald-700">
-        <p className="text-4xl">🌾</p>
-        <p className="mt-3 font-semibold">Nenhum produto disponível.</p>
-        <p className="mt-1 text-sm">O catálogo da loja ainda está sendo preparado.</p>
-      </div>
-    )
-  }
+      {category === 'items' && loadingItems && (
+        <div className="flex h-56 items-center justify-center text-sm text-emerald-700">
+          Carregando outros itens...
+        </div>
+      )}
 
-  return (
-    <div className="grid gap-3 md:grid-cols-2">
+      {category === 'items' && !loadingItems && itemsError && items.length === 0 && (
+        <div className="py-12 text-center text-red-700">
+          <p className="text-4xl">🛡️</p>
+          <p className="mt-3 font-semibold">Não foi possível carregar os outros itens.</p>
+          <p className="mt-1 text-sm">{itemsError}</p>
+          <button
+            type="button"
+            onClick={() => void refreshItems()}
+            className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      )}
+
+      {category === 'items' && !loadingItems && !itemsError && items.length === 0 && (
+        <div className="py-12 text-center text-emerald-700">
+          <p className="text-4xl">🛡️</p>
+          <p className="mt-3 font-semibold">Nenhum outro item disponível.</p>
+          <p className="mt-1 text-sm">Novidades aparecerão aqui quando chegarem à loja.</p>
+        </div>
+      )}
+
+      {category === 'items' && !loadingItems && items.length > 0 && (
+        <>
+          {itemsError && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <span>{itemsError}</span>
+              <button
+                type="button"
+                onClick={() => void refreshItems()}
+                className="shrink-0 font-semibold underline"
+              >
+                Tentar novamente
+              </button>
+            </div>
+          )}
+          <div className="grid gap-2 md:grid-cols-2">
       {items.map(item => {
-        const quantity = getQuantity(item.id)
+        const productKey = `item:${item.id}`
+        const quantity = getQuantity(productKey)
         const totalCost = item.buyPrice * quantity
         const isLocked = userLevel !== null && userLevel < item.minLevel
         const canAfford = coins !== null && coins >= totalCost
-        const isBusy = busyProductId === item.id
+        const isBusy = busyProductId === productKey
         const actionDisabled =
           loadingWallet ||
           coins === null ||
@@ -171,7 +216,7 @@ export function ShopBuyTab({
 
         return (
           <article
-            key={item.id}
+            key={productKey}
             className={`flex flex-col rounded-xl border bg-white p-3 shadow-sm transition ${
               isLocked ? 'border-slate-200 opacity-75' : 'border-sky-200 hover:border-sky-400'
             }`}
@@ -213,7 +258,7 @@ export function ShopBuyTab({
                   max={MAX_SHOP_QUANTITY}
                   step={1}
                   value={quantity}
-                  onChange={event => setQuantity(item.id, event.target.value)}
+                  onChange={event => setQuantity(productKey, event.target.value)}
                   disabled={isBusy}
                   aria-label={`Quantidade de ${item.name}`}
                   className="mt-1 w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-base text-emerald-950 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 disabled:opacity-60"
@@ -238,13 +283,61 @@ export function ShopBuyTab({
           </article>
         )
       })}
+          </div>
+        </>
+      )}
 
+      {category === 'seeds' && loadingSeeds && (
+        <div className="flex h-56 items-center justify-center text-sm text-emerald-700">
+          Carregando sementes...
+        </div>
+      )}
+
+      {category === 'seeds' && !loadingSeeds && seedsError && seeds.length === 0 && (
+        <div className="py-12 text-center text-red-700">
+          <p className="text-4xl">🌾</p>
+          <p className="mt-3 font-semibold">Não foi possível carregar as sementes.</p>
+          <p className="mt-1 text-sm">{seedsError}</p>
+          <button
+            type="button"
+            onClick={() => void refreshSeeds()}
+            className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      )}
+
+      {category === 'seeds' && !loadingSeeds && !seedsError && seeds.length === 0 && (
+        <div className="py-12 text-center text-emerald-700">
+          <p className="text-4xl">🌾</p>
+          <p className="mt-3 font-semibold">Nenhuma semente disponível.</p>
+          <p className="mt-1 text-sm">O catálogo de sementes ainda está sendo preparado.</p>
+        </div>
+      )}
+
+      {category === 'seeds' && !loadingSeeds && seeds.length > 0 && (
+        <>
+          {seedsError && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              <span>{seedsError}</span>
+              <button
+                type="button"
+                onClick={() => void refreshSeeds()}
+                className="shrink-0 font-semibold underline"
+              >
+                Tentar novamente
+              </button>
+            </div>
+          )}
+          <div className="grid gap-2 md:grid-cols-2">
       {seeds.map(seed => {
-        const quantity = getQuantity(seed.id)
+        const productKey = `seed:${seed.id}`
+        const quantity = getQuantity(productKey)
         const totalCost = seed.buyPrice * quantity
         const isLocked = userLevel !== null && userLevel < seed.minLevel
         const canAfford = coins !== null && coins >= totalCost
-        const isBusy = busyProductId === seed.id
+        const isBusy = busyProductId === productKey
         const actionDisabled =
           loadingWallet ||
           coins === null ||
@@ -266,7 +359,7 @@ export function ShopBuyTab({
 
         return (
           <article
-            key={seed.id}
+            key={productKey}
             className={`flex flex-col rounded-xl border bg-white p-3 shadow-sm transition ${
               isLocked ? 'border-slate-200 opacity-75' : 'border-transparent hover:border-emerald-200'
             }`}
@@ -300,7 +393,7 @@ export function ShopBuyTab({
                   max={MAX_SHOP_QUANTITY}
                   step={1}
                   value={quantity}
-                  onChange={event => setQuantity(seed.id, event.target.value)}
+                  onChange={event => setQuantity(productKey, event.target.value)}
                   disabled={isBusy}
                   aria-label={`Quantidade de sementes de ${seed.name}`}
                   className="mt-1 w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-base text-emerald-950 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 disabled:opacity-60"
@@ -325,6 +418,9 @@ export function ShopBuyTab({
           </article>
         )
       })}
+          </div>
+        </>
+      )}
     </div>
   )
 }

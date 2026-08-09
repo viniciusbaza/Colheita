@@ -1,3 +1,5 @@
+<!-- Esse arquivo deve funcionar como a constituição do Farm & Friends. -->
+
 # Farm & Friends Backend Guidance
 
 This file applies to all work inside `FarmAndFriends.Api/`.

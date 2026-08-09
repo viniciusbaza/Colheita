@@ -221,7 +221,6 @@ public sealed class PestFeatureFlagTests
         using var context = CreateContext();
         var controller = new ShopController(
             context,
-            new ExperienceService(),
             Options.Create(new PestOptions { Enabled = false }));
 
         var result = Assert.IsType<OkObjectResult>(
@@ -237,7 +236,6 @@ public sealed class PestFeatureFlagTests
         await using var context = CreateContext();
         var controller = new ShopController(
             context,
-            new ExperienceService(),
             Options.Create(new PestOptions { Enabled = false }));
 
         var result = Assert.IsType<ObjectResult>(

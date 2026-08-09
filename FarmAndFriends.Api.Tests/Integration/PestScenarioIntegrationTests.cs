@@ -1050,7 +1050,6 @@ public sealed class PestScenarioIntegrationTests
     {
         return new ShopController(
             context,
-            new ExperienceService(),
             Options.Create(new PestOptions { Enabled = true }))
         {
             ControllerContext = AuthenticatedController(userId)

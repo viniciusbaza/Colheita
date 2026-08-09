@@ -7,7 +7,6 @@ using FarmAndFriends.Api.Domain.Enums;
 using FarmAndFriends.Api.Domain.Entities;
 using FarmAndFriends.Api.Dtos.Shop;
 using FarmAndFriends.Api.Contracts.Shop;
-using FarmAndFriends.Api.Domain.Services;
 using FarmAndFriends.Api.Configuration;
 using FarmAndFriends.Api.Contracts.Pests;
 using Microsoft.Extensions.Options;
@@ -22,16 +21,13 @@ public class ShopController : ControllerBase
     private const int MaxQuantityPerTransaction = 10_000;
 
     private readonly AppDbContext _context;
-    private readonly ExperienceService _experienceService;
     private readonly PestOptions _pestOptions;
 
     public ShopController(
         AppDbContext context,
-        ExperienceService experienceService,
         IOptions<PestOptions> pestOptions)
     {
         _context = context;
-        _experienceService = experienceService;
         _pestOptions = pestOptions.Value;
     }
 
@@ -305,8 +301,6 @@ public class ShopController : ControllerBase
             _context.InventoryItems.Remove(cropItem);
 
         inventory.Coins = (int)updatedCoins;
-
-        _experienceService.AddXp(user, 5);
 
         await _context.SaveChangesAsync();
         await transaction.CommitAsync();

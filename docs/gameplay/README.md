@@ -487,7 +487,8 @@ A sale requires:
 * a valid quantity;
 * sufficient crop inventory.
 
-The server determines prices and final transaction values.
+The server determines prices and final transaction values. Selling crops grants
+standard currency only; it does not grant XP or alter the player's level.
 
 ## Experience and levels
 
@@ -499,6 +500,8 @@ Current XP sources include:
 * harvesting;
 * stealing;
 * plot caring;
+
+Selling crops is not an XP source.
 
 The backend calculates and grants XP.
 

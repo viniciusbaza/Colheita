@@ -1,8 +1,6 @@
 import { authFetch } from '../api/http'
 import type { BuyItemResponse } from '../types/Shop'
 
-export const MAX_SHOP_QUANTITY = 10_000
-
 type BuySeedResponse = {
   seedId: string
   quantity: number
