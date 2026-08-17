@@ -10,14 +10,15 @@ import {
 type Props = {
   farm: Farm | null
   cameraMode: FarmCameraMode
+  isVisiting: boolean
 }
 
 export function usePhaserGame(
   containerId: string,
-  { farm, cameraMode }: Props,
+  { farm, cameraMode, isVisiting }: Props,
 ) {
   const gameRef = useRef<Phaser.Game | null>(null)
-  const activeFarmIdRef = useRef<string | null>(null)
+  const activeFarmViewRef = useRef<string | null>(null)
   const teardownTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
@@ -60,7 +61,7 @@ export function usePhaserGame(
         if (gameRef.current !== game) return
 
         gameRef.current = null
-        activeFarmIdRef.current = null
+        activeFarmViewRef.current = null
         teardownTimerRef.current = null
         game.destroy(true)
         game.canvas.remove()
@@ -76,16 +77,18 @@ export function usePhaserGame(
 
     // SceneManager may still have the first add queued when StrictMode runs
     // this effect again, so the active farm is the idempotency guard.
-    if (activeFarmIdRef.current !== farm.id) {
+    const farmViewKey = `${farm.id}:${isVisiting ? 'visitor' : 'owner'}`
+
+    if (activeFarmViewRef.current !== farmViewKey) {
       if (!game.scene.getScene('FarmScene')) {
-        game.scene.add('FarmScene', FarmScene, true, { farm })
+        game.scene.add('FarmScene', FarmScene, true, { farm, isVisiting })
       } else {
-        game.scene.start('FarmScene', { farm })
+        game.scene.start('FarmScene', { farm, isVisiting })
       }
 
-      activeFarmIdRef.current = farm.id
+      activeFarmViewRef.current = farmViewKey
     }
 
     dispatchFarmCameraMode(cameraMode)
-  }, [cameraMode, farm])
+  }, [cameraMode, farm, isVisiting])
 }

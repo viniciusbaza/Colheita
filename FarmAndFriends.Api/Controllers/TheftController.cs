@@ -58,7 +58,7 @@ public class TheftController : ControllerBase
         var plots = await _context.LockFarmPlotsAsync(farmId);
         var plot = plots.SingleOrDefault(candidate => candidate.Id == plotId);
 
-        if (plot == null)
+        if (plot == null || !plot.Unlocked)
             return NotFound("Plot não encontrado.");
 
         if (farm.UserId == thiefUserId)

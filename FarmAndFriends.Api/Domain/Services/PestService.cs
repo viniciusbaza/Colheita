@@ -245,7 +245,7 @@ public sealed class PestService
             cancellationToken);
         var plot = plots.SingleOrDefault(candidate => candidate.Id == plotId);
 
-        if (plot == null)
+        if (plot == null || !plot.Unlocked)
             return new(PestActionFailure.PlotNotFound);
 
         var persistedAttempt = await FindPersistedRemovalAsync(

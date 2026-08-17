@@ -9,6 +9,11 @@ export const FARM_INITIAL_GRID_WIDTH =
 export const FARM_INITIAL_GRID_HEIGHT =
   FARM_PLOT_HEIGHT + FARM_TILE_HEIGHT * 2
 
+const FARM_EXPANDED_GRID_COLUMNS = 7
+const FARM_EXPANDED_GRID_ROWS = 4
+const FARM_EXPANDED_GRID_OFFSET_X = -FARM_TILE_WIDTH
+const FARM_EXPANDED_GRID_OFFSET_Y = -FARM_TILE_HEIGHT
+
 type GridPosition = {
   x: number
   y: number
@@ -42,10 +47,28 @@ export function calculateFarmEnvironmentExpansion(
   return Math.min(1.5, Math.max(1, 1 + (plotExpansion - 1) * 0.5))
 }
 
+function isCanonicalExpandedGrid(plots: readonly GridPosition[]) {
+  if (
+    plots.length !== FARM_EXPANDED_GRID_COLUMNS * FARM_EXPANDED_GRID_ROWS
+  ) {
+    return false
+  }
+
+  const coordinates = new Set(plots.map((plot) => `${plot.x}:${plot.y}`))
+
+  for (let y = 0; y < FARM_EXPANDED_GRID_ROWS; y += 1) {
+    for (let x = 0; x < FARM_EXPANDED_GRID_COLUMNS; x += 1) {
+      if (!coordinates.has(`${x}:${y}`)) return false
+    }
+  }
+
+  return true
+}
+
 /**
- * Centraliza qualquer grade isométrica no eixo X e mantém sua borda superior
- * no mesmo ponto visual. Assim, expansões crescem em direção ao primeiro
- * plano/portão sem depender de uma matriz fixa como 3x3.
+ * Mantém a grade inicial na ancoragem atual. A grade canônica 7x4 recebe um
+ * deslocamento visual de um tile para cima e para a esquerda, afastando sua
+ * extremidade direita da porteira sem alterar coordenadas autoritativas.
  */
 export function calculateFarmPlotLayout(
   plots: readonly GridPosition[],
@@ -86,8 +109,12 @@ export function calculateFarmPlotLayout(
     rawBottom = Math.max(rawBottom, isoY)
   }
 
-  const originX = -(rawLeft + rawRight) / 2
-  const originY = -FARM_PLOT_HEIGHT - rawTop
+  const expandedGrid = isCanonicalExpandedGrid(plots)
+  const originX = expandedGrid ? FARM_EXPANDED_GRID_OFFSET_X : 0
+  const originY =
+    -FARM_PLOT_HEIGHT
+    - rawTop
+    + (expandedGrid ? FARM_EXPANDED_GRID_OFFSET_Y : 0)
   const left = rawLeft + originX
   const top = rawTop + originY
   const right = rawRight + originX

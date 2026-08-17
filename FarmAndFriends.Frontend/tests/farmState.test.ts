@@ -46,6 +46,7 @@ const farm: Farm = {
   ownerUserId: 'owner-1',
   ownerUsername: 'owner',
   nextPestCheckAt: null,
+  landOffer: null,
   plots: [activePlot],
 }
 

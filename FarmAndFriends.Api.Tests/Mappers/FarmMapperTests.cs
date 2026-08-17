@@ -1,6 +1,8 @@
 using FarmAndFriends.Api.Contracts.Farms;
+using FarmAndFriends.Api.Contracts.Land;
 using FarmAndFriends.Api.Domain.Entities;
 using FarmAndFriends.Api.Domain.Enums;
+using FarmAndFriends.Api.Domain.Rules;
 using FarmAndFriends.Api.Domain.Services;
 using FarmAndFriends.Api.Mappers;
 using Xunit;
@@ -260,6 +262,135 @@ public sealed class FarmMapperTests
             nextPestCheckAt);
 
         Assert.Equal(nextPestCheckAt, response.NextPestCheckAt);
+    }
+
+    [Fact]
+    public void OwnerView_IncludesLockedPlotsAndLandOffer()
+    {
+        var now = Utc(2026, 8, 11, 10);
+        var farm = CreateFarm(Guid.NewGuid(), now);
+        farm.Plots.Add(new Plot
+        {
+            Id = Guid.NewGuid(),
+            FarmId = farm.Id,
+            Farm = farm,
+            X = 1,
+            Y = 0,
+            Unlocked = false
+        });
+        var locked = farm.Plots.Single(plot => !plot.Unlocked);
+        var offer = new LandOfferResponse(
+            locked.Id,
+            7,
+            28,
+            2,
+            new LandPricesResponse(500, 2),
+            null);
+
+        var response = FarmMapper.ToFarmResponse(
+            farm,
+            now,
+            new Dictionary<Guid, PlotCropCareState>(),
+            landOffer: offer,
+            isOwnerView: true);
+
+        Assert.Equal(2, response.Plots.Count);
+        Assert.Equal(offer, response.LandOffer);
+    }
+
+    [Fact]
+    public void VisitorView_IncludesFullInitialGridAndAlwaysHidesLandOffer()
+    {
+        var now = Utc(2026, 8, 11, 10);
+        var farm = CreateFarm(Guid.NewGuid(), now);
+        PopulateCanonicalLayout(farm, plotCount: 9, unlockedCount: 6);
+        var locked = farm.Plots.First(plot => !plot.Unlocked);
+        var offer = new LandOfferResponse(
+            locked.Id,
+            7,
+            28,
+            2,
+            new LandPricesResponse(500, 2),
+            null);
+
+        var response = FarmMapper.ToFarmResponse(
+            farm,
+            now,
+            new Dictionary<Guid, PlotCropCareState>(),
+            landOffer: offer,
+            isOwnerView: false);
+
+        Assert.Equal(9, response.Plots.Count);
+        Assert.Equal(6, response.Plots.Count(plot => plot.Unlocked));
+        Assert.Equal(3, response.Plots.Count(plot => !plot.Unlocked));
+        Assert.Null(response.LandOffer);
+    }
+
+    [Fact]
+    public void VisitorView_IncludesFullExpandedGridAndAlwaysHidesLandOffer()
+    {
+        var now = Utc(2026, 8, 11, 10);
+        var farm = CreateFarm(Guid.NewGuid(), now);
+        PopulateCanonicalLayout(farm, plotCount: 28, unlockedCount: 12);
+        var locked = farm.Plots.First(plot => !plot.Unlocked);
+        locked.SeedId = "corn";
+        locked.PlantedAt = now.AddHours(-2);
+        locked.ReadyAt = now.AddHours(-1);
+        locked.RemainingYield = 3;
+        locked.ProtectedUntil = now.AddHours(1);
+        locked.CareOpportunityId = Guid.NewGuid();
+        var offer = new LandOfferResponse(
+            locked.Id,
+            13,
+            28,
+            5,
+            new LandPricesResponse(10_000, 5),
+            null);
+
+        var response = FarmMapper.ToFarmResponse(
+            farm,
+            now,
+            new Dictionary<Guid, PlotCropCareState>(),
+            landOffer: offer,
+            isOwnerView: false);
+
+        Assert.Equal(28, response.Plots.Count);
+        Assert.Equal(12, response.Plots.Count(plot => plot.Unlocked));
+        Assert.Equal(16, response.Plots.Count(plot => !plot.Unlocked));
+        Assert.Equal(6, response.Plots.Max(plot => plot.X));
+        Assert.Equal(3, response.Plots.Max(plot => plot.Y));
+        var lockedResponse = response.Plots.Single(plot => plot.Id == locked.Id);
+        Assert.Null(lockedResponse.SeedId);
+        Assert.Null(lockedResponse.PlantedAt);
+        Assert.False(lockedResponse.IsReady);
+        Assert.Null(lockedResponse.ReadyAt);
+        Assert.Null(lockedResponse.RemainingYield);
+        Assert.Null(lockedResponse.ProtectedUntil);
+        Assert.Null(lockedResponse.Pest);
+        Assert.Null(lockedResponse.Care);
+        Assert.Null(response.LandOffer);
+    }
+
+    private static void PopulateCanonicalLayout(
+        Farm farm,
+        int plotCount,
+        int unlockedCount)
+    {
+        farm.Plots.Clear();
+
+        for (var plotNumber = 1; plotNumber <= plotCount; plotNumber++)
+        {
+            var definition = FarmLayoutRules.GetDefinition(plotNumber);
+            farm.Plots.Add(new Plot
+            {
+                Id = Guid.NewGuid(),
+                FarmId = farm.Id,
+                Farm = farm,
+                X = definition.X,
+                Y = definition.Y,
+                Unlocked = plotNumber <= unlockedCount
+            });
+        }
     }
 
     private static Farm CreateFarm(Guid ownerId, DateTime now)

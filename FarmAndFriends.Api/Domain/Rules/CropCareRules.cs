@@ -15,7 +15,8 @@ public static class CropCareRules
         Guid opportunityId,
         DateTime now)
     {
-        return plot.CareOpportunityId == opportunityId
+        return plot.Unlocked
+            && plot.CareOpportunityId == opportunityId
             && plot.SeedId != null
             && plot.ReadyAt > now;
     }
@@ -25,7 +26,8 @@ public static class CropCareRules
         Guid opportunityId,
         DateTime instant)
     {
-        return plot.CareOpportunityId == opportunityId
+        return plot.Unlocked
+            && plot.CareOpportunityId == opportunityId
             && plot.SeedId != null
             && plot.PlantedAt <= instant
             && plot.ReadyAt > instant;

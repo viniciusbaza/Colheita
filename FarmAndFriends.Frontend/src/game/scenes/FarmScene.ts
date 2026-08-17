@@ -7,6 +7,7 @@ import plotImage from '../assets/tiles/plot.png'
 import plotLockedImage from '../assets/tiles/plot-locked.png'
 import plotGlowImage from '../assets/tiles/plot-glow.png'
 import plotGrowingImage from '../assets/tiles/plot-growing.png'
+import landForSaleSignImage from '../assets/tiles/land-for-sale-sign.png'
 import {
   calculateFarmEnvironmentExpansion,
   calculateFarmPlotLayout,
@@ -18,6 +19,8 @@ import {
   type FarmCameraMode,
   type FarmCameraModeDetail,
 } from '../farmCamera'
+import { resolveLandOfferPlotId } from '../landOfferVisual'
+import { canReceivePlotInput } from '../plotInput'
 import sproutCarrotImage from '../assets/tiles/sprout/carrot.png'
 import sproutCornImage from '../assets/tiles/sprout/corn.png'
 import sproutPumpkinImage from '../assets/tiles/sprout/pumpkin.png'
@@ -43,6 +46,8 @@ const GROWTH_STAGE_2_THRESHOLD = 0.5
 const PLOT_SCALE = 0.11
 const ENVIRONMENT_SCALE = 0.42
 const CAMERA_DRAG_THRESHOLD = 8
+const LAND_OFFER_SIGN_WIDTH = FARM_TILE_WIDTH * 0.55
+const LAND_OFFER_SIGN_GROUND_OFFSET = FARM_TILE_HEIGHT * 0.1
 
 const DEPTH = {
   BACKDROP: -1_000,
@@ -88,6 +93,7 @@ function isPlotProtected(plot: Plot): boolean {
 
 export default class FarmScene extends Phaser.Scene {
   private farm!: Farm
+  private isVisiting = false
   private environment?: Phaser.GameObjects.Image
   private modalBlockers = new Set<string>()
   private plotTiles = new Map<string, Phaser.GameObjects.Image>()
@@ -98,6 +104,8 @@ export default class FarmScene extends Phaser.Scene {
   private focusZoom = 1
   private hudSafeArea = 96
   private cameraTween: Phaser.Tweens.Tween | null = null
+  private landOfferSign: Phaser.GameObjects.Image | null = null
+  private landOfferPlotId: string | null = null
   private panPointerId: number | null = null
   private panStartX = 0
   private panStartY = 0
@@ -113,8 +121,9 @@ export default class FarmScene extends Phaser.Scene {
     super('FarmScene')
   }
 
-  init(data: { farm: Farm}) {
+  init(data: { farm: Farm; isVisiting: boolean }) {
     this.farm = data.farm
+    this.isVisiting = data.isVisiting
   }
 
   preload() {
@@ -124,6 +133,7 @@ export default class FarmScene extends Phaser.Scene {
     this.load.image('plot-locked', plotLockedImage)
     this.load.image('plot-glow', plotGlowImage)
     this.load.image('plot-growing', plotGrowingImage)
+    this.load.image('land-for-sale-sign', landForSaleSignImage)
     this.load.image('sprout-carrot', sproutCarrotImage)
     this.load.image('ready-carrot', readyCarrotImage)
     this.load.image('sprout-corn', sproutCornImage)
@@ -166,6 +176,8 @@ export default class FarmScene extends Phaser.Scene {
     for (const plot of this.farm.plots) {
       this.createPlot(plot, plotLayout.originX, plotLayout.originY)
     }
+
+    this.syncLandOfferSign()
 
     this.layoutCamera(this.scale.gameSize.width, this.scale.gameSize.height)
     this.cameras.main.fadeIn(260)
@@ -212,6 +224,7 @@ export default class FarmScene extends Phaser.Scene {
     window.addEventListener('plot:steal:done', this.onStealDone)
     window.addEventListener('plot:care:done', this.onCareDone)
     window.addEventListener('plot:pest:remove:done', this.onPestRemoveDone)
+    this.events.once(Phaser.Scenes.Events.DESTROY, this.onSceneDestroy)
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener('plot:steal:done', this.onStealDone)
@@ -230,6 +243,8 @@ export default class FarmScene extends Phaser.Scene {
       this.input.off('pointerup', this.onPanPointerUp)
       this.input.off('pointerupoutside', this.onPanPointerUp)
       this.input.off('gameout', this.onPointerLeave)
+      this.events.off(Phaser.Scenes.Events.DESTROY, this.onSceneDestroy)
+      this.removeLandOfferSign()
       this.cleanupPestVisuals()
       this.plotTiles.clear()
       this.cancelPan()
@@ -615,22 +630,14 @@ export default class FarmScene extends Phaser.Scene {
     ground
       .setOrigin(0.5, 1)
       .setDepth(DEPTH.PLOTS + plot.x + plot.y)
-      .setInteractive(
-        new Phaser.Geom.Polygon([
-          FARM_TILE_WIDTH / 2, 0,
-          FARM_TILE_WIDTH, FARM_TILE_HEIGHT / 2,
-          FARM_TILE_WIDTH / 2, FARM_TILE_HEIGHT,
-          0, FARM_TILE_HEIGHT / 2,
-        ]),
-        Phaser.Geom.Polygon.Contains
-      )
-
-    // 🔍 debug visual do hit box
-    //this.input.enableDebug(ground)
 
     tile.setData('plotId', plot.id)
     tile.setData('gridX', plot.x)
     tile.setData('gridY', plot.y)
+    tile.setData(
+      'receivesPlotInput',
+      canReceivePlotInput(plot, this.isVisiting),
+    )
 
     this.plotTiles.set(plot.id, tile)
     tile.setData('lastRemainingYield', plot.remainingYield)
@@ -651,8 +658,21 @@ export default class FarmScene extends Phaser.Scene {
     this.syncCareBadge(tile, plot, false)
     this.syncPestVisual(tile, plot, false)
 
+    if (!canReceivePlotInput(plot, this.isVisiting)) return
+
+    ground.setInteractive(
+      new Phaser.Geom.Polygon([
+        FARM_TILE_WIDTH / 2, 0,
+        FARM_TILE_WIDTH, FARM_TILE_HEIGHT / 2,
+        FARM_TILE_WIDTH / 2, FARM_TILE_HEIGHT,
+        0, FARM_TILE_HEIGHT / 2,
+      ]),
+      Phaser.Geom.Polygon.Contains,
+    )
+
     // Abre somente em tap/click. Um arrasto iniciado sobre o plot move a
-    // câmera sem abrir o modal acidentalmente.
+    // câmera sem abrir o modal acidentalmente. Visitantes não registram este
+    // handler nos lotes bloqueados, mas o pan global continua disponível.
     ground.on('pointerup', () => {
       if (
         this.panMoved ||
@@ -672,12 +692,12 @@ export default class FarmScene extends Phaser.Scene {
       
       window.dispatchEvent(
         new CustomEvent('plot:click', {
-          detail: { 
+          detail: {
             plotId: plot.id,
             x: screenX,
             y: screenY,
-          }
-        })
+          },
+        }),
       )
     })
   }
@@ -1083,6 +1103,68 @@ export default class FarmScene extends Phaser.Scene {
     return 'plot'
   }
 
+  private syncLandOfferSign() {
+    if (this.isVisiting) {
+      this.removeLandOfferSign()
+      return
+    }
+
+    const plotId = resolveLandOfferPlotId(this.farm)
+
+    if (!plotId) {
+      this.removeLandOfferSign()
+      return
+    }
+
+    const tile = this.plotTiles.get(plotId)
+
+    if (!tile) {
+      this.removeLandOfferSign()
+      return
+    }
+
+    if (
+      this.landOfferSign?.active &&
+      this.landOfferPlotId === plotId
+    ) {
+      return
+    }
+
+    this.removeLandOfferSign()
+
+    const sign = this.add
+      .image(
+        tile.x,
+        tile.y - LAND_OFFER_SIGN_GROUND_OFFSET,
+        'land-for-sale-sign',
+      )
+      .setName('land-offer-sign')
+      .setOrigin(0.5, 1)
+      .setDepth(tile.depth + 0.5)
+
+    sign.setScale(LAND_OFFER_SIGN_WIDTH / sign.width)
+
+    sign.setData('plotId', plotId)
+    this.landOfferSign = sign
+    this.landOfferPlotId = plotId
+  }
+
+  private removeLandOfferSign() {
+    const sign = this.landOfferSign
+
+    if (sign) {
+      this.tweens.killTweensOf(sign)
+      sign.destroy()
+    }
+
+    this.landOfferSign = null
+    this.landOfferPlotId = null
+  }
+
+  private onSceneDestroy = () => {
+    this.removeLandOfferSign()
+  }
+
   private onModalToggle = (e: Event) => {
     const { source = 'legacy', open } = (
       e as CustomEvent<{ source?: string; open: boolean }>
@@ -1111,16 +1193,22 @@ export default class FarmScene extends Phaser.Scene {
         return (
           !tile ||
           tile.getData('gridX') !== plot.x ||
-          tile.getData('gridY') !== plot.y
+          tile.getData('gridY') !== plot.y ||
+          tile.getData('receivesPlotInput') !== canReceivePlotInput(
+            plot,
+            this.isVisiting,
+          )
         )
       })
 
     if (topologyChanged) {
       // Compras futuras podem adicionar plots ou ampliar a matriz. Reiniciar
       // reconstrói tiles, hit areas, bounds e enquadramento de forma atômica.
-      this.scene.restart({ farm })
+      this.scene.restart({ farm, isVisiting: this.isVisiting })
       return
     }
+
+    this.syncLandOfferSign()
 
     // Atualiza cada plot
     for (const plot of farm.plots) {

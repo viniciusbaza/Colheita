@@ -35,6 +35,37 @@ export type PlotHarvestDone = {
   xpGained: number
 }
 
+export type LandPaymentCurrency = 'coins' | 'premiumCoins'
+
+export type FarmDimensions = {
+  columns: number
+  rows: number
+}
+
+export type LandOffer = {
+  plotId: string
+  plotNumber: number
+  maxPlots: number
+  minLevel: number
+  prices: Record<LandPaymentCurrency, number>
+  expandsTo: FarmDimensions | null
+}
+
+export type LandPurchaseRequest = {
+  paymentCurrency: LandPaymentCurrency
+}
+
+export type LandPurchaseResponse = {
+  completionId: string
+  plotId: string
+  plotNumber: number
+  paymentCurrency: LandPaymentCurrency
+  amountSpent: number
+  addedPlotCount: number
+  expandedTo: FarmDimensions | null
+  replayed: boolean
+}
+
 export type StealResponse = {
   plotId: string
   stolen: number
@@ -172,6 +203,7 @@ export type Farm = {
   ownerUserId: string
   ownerUsername: string
   nextPestCheckAt: string | null
+  landOffer: LandOffer | null
   plots: Plot[]
 }
 

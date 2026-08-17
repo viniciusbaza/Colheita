@@ -24,7 +24,7 @@ ExecPlan location.
 
 Status: Active
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-08-11
 
 Product owner: Rato
 
@@ -678,6 +678,34 @@ Possible future directions include:
 
 These are product directions, not approved implementation commitments.
 
+### Approved land expansion prototype
+
+Land expansion is approved as a visible-progression prototype from the initial
+3×3 farm to a maximum of 7 columns × 4 rows.
+
+The owner unlocks one plot at a time through a single in-world sale sign. Each
+purchase requires both a progression level and one of two server-priced payment
+routes: standard currency or premium currency. Premium never bypasses the level
+gate, and every productive plot remains obtainable through normal play.
+
+This exception does not approve premium-only productive progression or future
+sale of economic advantage. If premium currency becomes purchasable or gains a
+renewable source, the land route must return to product and economy review.
+
+The expansion should create anticipation without pressure:
+
+* no expiry, daily offer or absence penalty;
+* one explicit `Buy` action after the player chooses a payment route and sees
+  its price, balance and level requirement;
+* one understandable next plot;
+* immediate planting value after purchase;
+* no social announcement, ranking or request for help;
+* visitors see the owner's complete current topology, including which plots
+  are still locked, but never receive a land offer or purchase action.
+
+The completed 7×4 farm has no placeholder for a speculative next stage. The
+sale sign disappears after the 28th plot is unlocked.
+
 ## Smallest playable feature principle
 
 Every new feature should begin with the smallest version that can validate its
@@ -1122,7 +1150,6 @@ The following ideas are potential directions, not approved commitments:
 * decorations;
 * animals;
 * buildings;
-* expanded land;
 * reciprocal social actions;
 * social reaction messages;
 * daily or weekly objectives;
@@ -1142,7 +1169,6 @@ during implementation:
 * How should a player respond after being stolen from?
 * What new-player protection is necessary?
 * What should each level visibly unlock?
-* How should land expansion work?
 * Which forms of customization should appear first?
 * Should decorations have gameplay effects?
 * How should pests create anticipation without anxiety?

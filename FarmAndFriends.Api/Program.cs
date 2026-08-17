@@ -60,6 +60,10 @@ builder.Services
     .Validate(options =>
         options.RemovalRewardRollingWindowHours > 0)
     .ValidateOnStart();
+builder.Services
+    .AddOptions<LandExpansionOptions>()
+    .Bind(builder.Configuration.GetSection(
+        LandExpansionOptions.SectionName));
 
 var jwtSettings = builder.Configuration
     .GetSection("Jwt")
@@ -128,6 +132,8 @@ builder.Services.AddScoped<FriendshipService>();
 builder.Services.AddScoped<CropCareService>();
 // Crop pests
 builder.Services.AddScoped<PestService>();
+// Land expansion
+builder.Services.AddScoped<LandExpansionService>();
 builder.Services.AddSingleton(TimeProvider.System);
 
 // CORS Policy

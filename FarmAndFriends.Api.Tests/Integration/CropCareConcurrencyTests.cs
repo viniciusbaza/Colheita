@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using Xunit;
 
 namespace FarmAndFriends.Api.Tests.Integration;
@@ -21,18 +22,124 @@ public sealed class PostgresFactAttribute : FactAttribute
 {
     public PostgresFactAttribute()
     {
-        if (string.IsNullOrWhiteSpace(
-                Environment.GetEnvironmentVariable(
-                    "CROP_CARE_TEST_CONNECTION")))
+        var connectionString = Environment.GetEnvironmentVariable(
+            "CROP_CARE_TEST_CONNECTION");
+
+        if (string.IsNullOrWhiteSpace(connectionString))
         {
             Skip =
-                "Set CROP_CARE_TEST_CONNECTION to run PostgreSQL integration tests.";
+                "Set CROP_CARE_TEST_CONNECTION to an isolated PostgreSQL test database to run integration tests.";
+            return;
+        }
+
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(connectionString);
+            if (string.Equals(
+                    builder.Database,
+                    "farmandfriends",
+                    StringComparison.Ordinal))
+            {
+                Skip =
+                    "CROP_CARE_TEST_CONNECTION must target an isolated test database; database 'farmandfriends' is reserved for the local application and is not allowed.";
+            }
+        }
+        catch (ArgumentException)
+        {
+            Skip =
+                "CROP_CARE_TEST_CONNECTION is not a valid PostgreSQL connection string. Configure an isolated test database.";
         }
     }
 }
 
 public sealed class CropCareConcurrencyTests
 {
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task Care_LockedPlotWithGrowingState_GrantsNothing()
+    {
+        var connectionString =
+            Environment.GetEnvironmentVariable("CROP_CARE_TEST_CONNECTION")!;
+        var dbOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseNpgsql(connectionString)
+            .Options;
+        var now = new DateTime(2026, 7, 26, 10, 0, 0, DateTimeKind.Utc);
+        var clock = new MutableTimeProvider(now);
+        var ownerId = Guid.NewGuid();
+        var visitorId = Guid.NewGuid();
+        var farmId = Guid.NewGuid();
+        var plotId = Guid.NewGuid();
+        var opportunityId = Guid.NewGuid();
+        var lockedPlot = CreateGrowingPlot(
+            plotId,
+            farmId,
+            opportunityId,
+            x: 0,
+            now);
+        lockedPlot.Unlocked = false;
+
+        await using (var arrangeContext = new AppDbContext(dbOptions))
+        {
+            arrangeContext.Users.AddRange(
+                CreateUser(ownerId, "owner"),
+                CreateUser(visitorId, "visitor"));
+            arrangeContext.Farms.Add(new Farm
+            {
+                Id = farmId,
+                Name = "Locked plot farm",
+                UserId = ownerId
+            });
+            arrangeContext.Plots.Add(lockedPlot);
+            arrangeContext.Inventories.Add(CreateInventory(visitorId));
+            arrangeContext.Friendships.Add(
+                CreateAcceptedFriendship(ownerId, visitorId));
+            await arrangeContext.SaveChangesAsync();
+        }
+
+        await using (var careContext = new AppDbContext(dbOptions))
+        {
+            var service = CreateService(careContext, clock);
+            var states = await service.GetFarmCareStatesAsync(
+                farmId,
+                visitorId,
+                ownerId,
+                new[] { lockedPlot },
+                now);
+            var attempt = await service.CareAsync(
+                visitorId,
+                farmId,
+                plotId,
+                opportunityId,
+                Guid.NewGuid());
+
+            Assert.Empty(states);
+            Assert.Equal(CropCareFailure.PlotNotFound, attempt.Failure);
+        }
+
+        await using var assertion = new AppDbContext(dbOptions);
+        var savedPlot = await assertion.Plots
+            .AsNoTracking()
+            .SingleAsync(plot => plot.Id == plotId);
+        var visitor = await assertion.Users
+            .AsNoTracking()
+            .SingleAsync(user => user.Id == visitorId);
+        var inventory = await assertion.Inventories
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.UserId == visitorId);
+
+        Assert.False(savedPlot.Unlocked);
+        Assert.Equal(opportunityId, savedPlot.CareOpportunityId);
+        Assert.Equal(0, visitor.CurrentXp);
+        Assert.Equal(100, inventory.Coins);
+        Assert.False(await assertion.CropCareCompletions.AnyAsync(
+            completion => completion.PlotId == plotId));
+        Assert.False(await assertion.VisitorFarmCareCycles.AnyAsync(
+            cycle => cycle.FarmId == farmId));
+        Assert.False(await assertion.Notifications.AnyAsync(notification =>
+            notification.RecipientUserId == ownerId
+            && notification.ActorUserId == visitorId));
+    }
+
     [PostgresFact]
     [Trait("Category", "Postgres")]
     public async Task ConcurrentVisitors_CanBothCareTheSamePlotAndBeRewarded()
@@ -183,7 +290,7 @@ public sealed class CropCareConcurrencyTests
         Assert.All(completions, completion =>
         {
             Assert.Equal(2, completion.CoinsGained);
-            Assert.Equal(2, completion.XpGained);
+            Assert.Equal(5, completion.XpGained);
         });
         Assert.Equal(2, cycles.Count);
         Assert.All(cycles, cycle =>
@@ -192,7 +299,7 @@ public sealed class CropCareConcurrencyTests
             Assert.Equal(TimeSpan.FromHours(5), cycle.EndsAt - cycle.StartedAt);
         });
         Assert.All(inventories, inventory => Assert.Equal(102, inventory.Coins));
-        Assert.All(visitors, visitor => Assert.Equal(2, visitor.CurrentXp));
+        Assert.All(visitors, visitor => Assert.Equal(5, visitor.CurrentXp));
         Assert.Equal(2, notificationCount);
 
         var ownerState = Assert.Contains(plotId, ownerStates);
@@ -1492,7 +1599,7 @@ public sealed class CropCareConcurrencyTests
                 plot.Id == firstPlotId || plot.Id == secondPlotId)
             .ToListAsync();
 
-        Assert.All(users, user => Assert.Equal(2, user.CurrentXp));
+        Assert.All(users, user => Assert.Equal(5, user.CurrentXp));
         Assert.All(inventories, inventory => Assert.Equal(102, inventory.Coins));
         Assert.Equal(2, completions.Count);
         Assert.Contains(

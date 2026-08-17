@@ -4,14 +4,21 @@ import { usePlotInteraction } from '../farm/usePlotInteraction'
 import { PlayerHUD } from '../components/PlayerHUD' 
 import { PhaserGame } from '../game/PhaserGame'
 import { PlotModal } from '../components/PlotModal'
+import type { LandPurchaseFeedback } from '../components/PlotModal'
+import type { LandPurchaseAttempt } from '../land/landPurchase'
 import { clamp } from '../utils/math'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FarmCameraMode } from '../game/farmCamera'
 
 export default function Game() {
   const { user, loading } = useUser()
-  const { farm, loading: farmLoading } = useFarm()
+  const { farm, loading: farmLoading, isVisiting } = useFarm()
   const { selectedPlot, closePlot } = usePlotInteraction()
+  const [plotModalBusy, setPlotModalBusy] = useState(false)
+  const landPurchaseAttemptStore = useRef<LandPurchaseAttempt | null>(null)
+  const [landPurchaseFeedback, setLandPurchaseFeedback] = useState<
+    LandPurchaseFeedback | null
+  >(null)
   const [cameraPreference, setCameraPreference] = useState<{
     farmId: string | null
     mode: FarmCameraMode
@@ -24,6 +31,17 @@ export default function Game() {
       })
     )
   }, [selectedPlot])
+
+  useEffect(() => {
+    if (!landPurchaseFeedback) return
+    if (landPurchaseFeedback.type === 'pending') return
+
+    const timeout = window.setTimeout(() => {
+      setLandPurchaseFeedback(null)
+    }, landPurchaseFeedback.type === 'error' ? 8_000 : 5_000)
+
+    return () => window.clearTimeout(timeout)
+  }, [landPurchaseFeedback])
   
   // Estado de loading
   if (loading || farmLoading) {
@@ -68,13 +86,34 @@ export default function Game() {
     <div className="relative h-screen w-screen overflow-hidden bg-[#dff5ff] text-white">
 
       {/* Phaser ocupa todo o espaço */}
-      <PhaserGame farm={farm} cameraMode={cameraMode} />
+      <PhaserGame
+        farm={farm}
+        cameraMode={cameraMode}
+        isVisiting={isVisiting}
+      />
 
       {/* HUD flutuante */}
       <PlayerHUD
         cameraMode={cameraMode}
         onCameraModeChange={changeCameraMode}
       />
+
+      {landPurchaseFeedback && (
+        <div
+          role={landPurchaseFeedback.type === 'error' ? 'alert' : 'status'}
+          aria-live={landPurchaseFeedback.type === 'error' ? 'assertive' : 'polite'}
+          className={`pointer-events-none fixed bottom-5 left-1/2 z-[70] w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border px-4 py-3 text-center text-sm font-bold shadow-lg ${
+            landPurchaseFeedback.type === 'error'
+              ? 'border-red-300 bg-red-50 text-red-900'
+              : landPurchaseFeedback.type === 'pending'
+                ? 'border-amber-300 bg-amber-50 text-amber-900'
+                : 'border-emerald-300 bg-emerald-50 text-emerald-900'
+          }`}
+        >
+          {landPurchaseFeedback.type === 'pending' ? '🔄' : '🌱'}{' '}
+          {landPurchaseFeedback.message}
+        </div>
+      )}
 
       {/* Modal do Plot */}
       {selectedPlot && (() => {
@@ -97,7 +136,12 @@ export default function Game() {
         )
 
         return (
-          <div className='fixed inset-0 z-40' onClick={closePlot}>
+          <div
+            className='fixed inset-0 z-40'
+            onClick={() => {
+              if (!plotModalBusy) closePlot()
+            }}
+          >
             <div className='plot-modal-anchor fixed z-50'
               style={{
                 left: modalX,
@@ -107,7 +151,10 @@ export default function Game() {
             >
               <PlotModal 
                 plotId={selectedPlot.plotId} 
-                onClose={closePlot} 
+                onClose={closePlot}
+                landPurchaseAttemptStore={landPurchaseAttemptStore}
+                onBusyChange={setPlotModalBusy}
+                onLandPurchaseFeedback={setLandPurchaseFeedback}
               />
             </div>
           </div>

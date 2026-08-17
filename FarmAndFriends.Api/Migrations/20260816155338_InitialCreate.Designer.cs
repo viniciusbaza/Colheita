@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FarmAndFriends.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260802000427_AddPestRemovalRewards")]
-    partial class AddPestRemovalRewards
+    [Migration("20260816155338_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -173,7 +173,12 @@ namespace FarmAndFriends.Api.Migrations
 
                     b.HasIndex("UserId");
 
-                    b.ToTable("Inventories");
+                    b.ToTable("Inventories", t =>
+                        {
+                            t.HasCheckConstraint("CK_Inventories_Coins_NonNegative", "\"Coins\" >= 0");
+
+                            t.HasCheckConstraint("CK_Inventories_PremiumCoins_NonNegative", "\"PremiumCoins\" >= 0");
+                        });
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.InventoryItem", b =>
@@ -200,6 +205,83 @@ namespace FarmAndFriends.Api.Migrations
                     b.HasIndex("InventoryId");
 
                     b.ToTable("InventoryItems");
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.LandPurchaseCompletion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AddedPlotCount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("AmountSpent")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("BuyerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CoinsAfter")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ExpandedHeight")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ExpandedWidth")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("FarmId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("IdempotencyKey")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PaymentCurrency")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("PlotId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("PlotNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PremiumCoinsAfter")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("PurchasedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlotId")
+                        .IsUnique();
+
+                    b.HasIndex("BuyerUserId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("FarmId", "BuyerUserId");
+
+                    b.HasIndex("FarmId", "PlotNumber")
+                        .IsUnique();
+
+                    b.HasIndex("PlotId", "FarmId");
+
+                    b.ToTable("LandPurchaseCompletions", t =>
+                        {
+                            t.HasCheckConstraint("CK_LandPurchaseCompletions_AmountSpent_Positive", "\"AmountSpent\" > 0");
+
+                            t.HasCheckConstraint("CK_LandPurchaseCompletions_CoinsAfter_NonNegative", "\"CoinsAfter\" >= 0");
+
+                            t.HasCheckConstraint("CK_LandPurchaseCompletions_ExpansionMetadata_Consistent", "(\"PlotNumber\" = 9 AND \"AddedPlotCount\" = 19 AND \"ExpandedWidth\" = 7 AND \"ExpandedHeight\" = 4) OR (\"PlotNumber\" <> 9 AND \"AddedPlotCount\" = 0 AND \"ExpandedWidth\" IS NULL AND \"ExpandedHeight\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_LandPurchaseCompletions_PaymentCurrency_Valid", "\"PaymentCurrency\" IN ('coins', 'premiumCoins')");
+
+                            t.HasCheckConstraint("CK_LandPurchaseCompletions_PlotNumber_Range", "\"PlotNumber\" >= 7 AND \"PlotNumber\" <= 28");
+
+                            t.HasCheckConstraint("CK_LandPurchaseCompletions_PremiumCoinsAfter_NonNegative", "\"PremiumCoinsAfter\" >= 0");
+                        });
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Notification", b =>
@@ -394,12 +476,15 @@ namespace FarmAndFriends.Api.Migrations
                     b.HasIndex("CareOpportunityId")
                         .IsUnique();
 
-                    b.HasIndex("FarmId");
-
                     b.HasIndex("PestOccurrenceId");
+
+                    b.HasIndex("FarmId", "X", "Y")
+                        .IsUnique();
 
                     b.ToTable("Plots", t =>
                         {
+                            t.HasCheckConstraint("CK_Plots_Coordinates_NonNegative", "\"X\" >= 0 AND \"Y\" >= 0");
+
                             t.HasCheckConstraint("CK_Plots_PestConsumedAmount_NonNegative", "\"PestConsumedAmount\" >= 0");
 
                             t.HasCheckConstraint("CK_Plots_RemainingYield_Positive", "\"RemainingYield\" IS NULL OR \"RemainingYield\" >= 1");
@@ -738,6 +823,35 @@ namespace FarmAndFriends.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Inventory");
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.LandPurchaseCompletion", b =>
+                {
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.User", "BuyerUser")
+                        .WithMany()
+                        .HasForeignKey("BuyerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.Farm", "Farm")
+                        .WithMany()
+                        .HasForeignKey("FarmId", "BuyerUserId")
+                        .HasPrincipalKey("Id", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.Plot", "Plot")
+                        .WithMany()
+                        .HasForeignKey("PlotId", "FarmId")
+                        .HasPrincipalKey("Id", "FarmId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("BuyerUser");
+
+                    b.Navigation("Farm");
+
+                    b.Navigation("Plot");
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Notification", b =>

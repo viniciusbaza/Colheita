@@ -730,6 +730,7 @@ public sealed class PestScenarioIntegrationTests
         var inactiveOccurrenceId = Guid.NewGuid();
         var inventoryId = Guid.NewGuid();
         var resolvedPlot = EmptyPlot(inactivePlotId, farmId);
+        resolvedPlot.X = 1;
         resolvedPlot.PestOccurrenceId = inactiveOccurrenceId;
         resolvedPlot.PestType = PestType.Caterpillar;
         resolvedPlot.PestStatus = PestStatus.Removed;
@@ -1009,6 +1010,141 @@ public sealed class PestScenarioIntegrationTests
         Assert.False(await assertion.Notifications.AnyAsync(notification =>
             notification.TheftLogId != null
             && notification.RecipientUserId == ownerId));
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task Theft_LockedPlotWithCropState_GrantsNothing()
+    {
+        var database = DatabaseOptions();
+        var now = UtcNowRounded();
+        var ownerId = Guid.NewGuid();
+        var visitorId = Guid.NewGuid();
+        var farmId = Guid.NewGuid();
+        var plotId = Guid.NewGuid();
+        var visitorInventoryId = Guid.NewGuid();
+        var lockedPlot = ActivePlot(
+            plotId,
+            farmId,
+            now,
+            now.AddMinutes(10));
+        lockedPlot.Unlocked = false;
+
+        await ArrangeFarmAsync(
+            database,
+            ownerId,
+            farmId,
+            lockedPlot,
+            CreateUser(visitorId, "visitor"),
+            CreateAcceptedFriendship(ownerId, visitorId),
+            new Inventory
+            {
+                Id = visitorInventoryId,
+                UserId = visitorId,
+                Coins = 100
+            });
+
+        await using (var context = new AppDbContext(database))
+        {
+            var action = await CreateTheftController(
+                    context,
+                    visitorId,
+                    now)
+                .Steal(farmId, plotId);
+            Assert.Equal(
+                "Plot não encontrado.",
+                Assert.IsType<NotFoundObjectResult>(action).Value);
+        }
+
+        await using var assertion = new AppDbContext(database);
+        var plot = await assertion.Plots
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == plotId);
+        var visitor = await assertion.Users
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == visitorId);
+
+        Assert.False(plot.Unlocked);
+        Assert.Equal(3, plot.RemainingYield);
+        Assert.Equal(PestStatus.Active, plot.PestStatus);
+        Assert.Equal(0, visitor.CurrentXp);
+        Assert.False(await assertion.InventoryItems.AnyAsync(item =>
+            item.InventoryId == visitorInventoryId));
+        Assert.False(await assertion.TheftLogs.AnyAsync(log =>
+            log.PlotId == plotId));
+        Assert.False(await assertion.Notifications.AnyAsync(notification =>
+            notification.RecipientUserId == ownerId
+            && notification.ActorUserId == visitorId));
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task PestRemoval_LockedPlotWithActivePest_GrantsNothing()
+    {
+        var database = DatabaseOptions();
+        var now = UtcNowRounded();
+        var ownerId = Guid.NewGuid();
+        var farmId = Guid.NewGuid();
+        var plotId = Guid.NewGuid();
+        var occurrenceId = Guid.NewGuid();
+        var lockedPlot = ActivePlot(
+            plotId,
+            farmId,
+            now,
+            now.AddMinutes(10),
+            occurrenceId);
+        lockedPlot.Unlocked = false;
+
+        await ArrangeFarmAsync(
+            database,
+            ownerId,
+            farmId,
+            lockedPlot,
+            new Inventory
+            {
+                Id = Guid.NewGuid(),
+                UserId = ownerId,
+                Coins = 100
+            });
+
+        await using (var context = new AppDbContext(database))
+        {
+            var action = await CreatePestController(context, ownerId, now)
+                .Remove(
+                    farmId,
+                    plotId,
+                    new RemovePestRequest(occurrenceId),
+                    Guid.NewGuid().ToString(),
+                    CancellationToken.None);
+            AssertProblem(
+                action,
+                StatusCodes.Status404NotFound,
+                PestErrorCodes.PlotNotFound);
+        }
+
+        await using var assertion = new AppDbContext(database);
+        var plot = await assertion.Plots
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == plotId);
+        var owner = await assertion.Users
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == ownerId);
+
+        Assert.False(plot.Unlocked);
+        Assert.Equal(PestStatus.Active, plot.PestStatus);
+        Assert.Equal(occurrenceId, plot.PestOccurrenceId);
+        Assert.Equal(3, plot.RemainingYield);
+        Assert.Equal(0, owner.CurrentXp);
+        Assert.Equal(
+            100,
+            await assertion.Inventories
+                .Where(inventory => inventory.UserId == ownerId)
+                .Select(inventory => inventory.Coins)
+                .SingleAsync());
+        Assert.False(await assertion.PestRemovalCompletions.AnyAsync(
+            completion => completion.PlotId == plotId));
+        Assert.False(await assertion.Notifications.AnyAsync(notification =>
+            notification.PestPlotId == plotId));
     }
 
     private static async Task<T> AfterGate<T>(

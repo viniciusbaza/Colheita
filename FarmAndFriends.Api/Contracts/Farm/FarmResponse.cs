@@ -1,4 +1,5 @@
 using FarmAndFriends.Api.Contracts.Pests;
+using FarmAndFriends.Api.Contracts.Land;
 
 namespace FarmAndFriends.Api.Contracts.Farms;
 
@@ -8,7 +9,8 @@ public record FarmResponse(
     Guid OwnerUserId,
     string OwnerUsername,
     List<PlotResponse> Plots,
-    DateTime? NextPestCheckAt
+    DateTime? NextPestCheckAt,
+    LandOfferResponse? LandOffer
 );
 
 public record PlotResponse(

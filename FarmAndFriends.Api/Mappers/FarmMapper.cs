@@ -1,5 +1,6 @@
 using FarmAndFriends.Api.Contracts.Farms;
 using FarmAndFriends.Api.Contracts.Pests;
+using FarmAndFriends.Api.Contracts.Land;
 using FarmAndFriends.Api.Domain.Entities;
 using FarmAndFriends.Api.Domain.Rules;
 using FarmAndFriends.Api.Domain.Services;
@@ -12,7 +13,9 @@ public static class FarmMapper
         Farm farm,
         DateTime now,
         IReadOnlyDictionary<Guid, PlotCropCareState> careStates,
-        DateTime? nextPestCheckAt = null)
+        DateTime? nextPestCheckAt = null,
+        LandOfferResponse? landOffer = null,
+        bool isOwnerView = true)
     {
         return new FarmResponse(
             farm.Id,
@@ -29,7 +32,8 @@ public static class FarmMapper
                         ? careState
                         : null))
                 .ToList(),
-            nextPestCheckAt
+            nextPestCheckAt,
+            isOwnerView ? landOffer : null
         );
     }
 
@@ -38,6 +42,23 @@ public static class FarmMapper
         DateTime now,
         PlotCropCareState? careState)
     {
+        if (!p.Unlocked)
+        {
+            return new PlotResponse(
+                p.Id,
+                p.X,
+                p.Y,
+                Unlocked: false,
+                SeedId: null,
+                PlantedAt: null,
+                IsReady: false,
+                ReadyAt: null,
+                RemainingYield: null,
+                ProtectedUntil: null,
+                Pest: null,
+                Care: null);
+        }
+
         var isReady = p.ReadyAt != null && p.ReadyAt <= now;
 
         return new PlotResponse(

@@ -14,7 +14,7 @@ Proposed mechanics must not be added here until they are approved.
 
 Status: Active
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-08-11
 
 Maintainers:
 
@@ -161,6 +161,62 @@ A theft action does not clear the plot.
 
 It changes the ready plot's RemainingYield.
 
+## Land expansion
+
+Every new farm starts as a 3×3 grid with six unlocked plots. The owner sees one
+`VENDE-SE` sign on the only plot currently offered for purchase.
+
+The initial purchase order is:
+
+```text
+(0,2) -> (1,2) -> (2,2)
+```
+
+Buying `(2,2)` completes the initial area and reveals a 7-column × 4-row grid.
+The 19 new plots appear locked. Their purchase order is:
+
+```text
+(0,3) -> (1,3) -> (2,3)
+-> columns x=3, x=4, x=5 and x=6 from y=0 through y=3
+```
+
+Each purchase:
+
+* requires the configured minimum player level;
+* may be paid with either standard or premium currency;
+* never allows premium currency to bypass the level requirement;
+* displays both prices and the current balances before purchase;
+* requires the player to choose a payment route and then press the in-game
+  `Buy` action;
+* displays the `7 × 4` expansion notice only on the purchase that completes the
+  initial `3 × 3` grid;
+* unlocks exactly one empty plot;
+* moves the sign only after an authoritative farm sync confirms the purchase;
+* keeps the sale sign visually static on the offered plot;
+* is permanent and cannot be sold back.
+
+The initial price curve is:
+
+| Plots | Minimum level | Standard price | Premium price |
+| ----- | ------------- | -------------- | ------------- |
+| 7     | 2             | 500            | 2             |
+| 8     | 3             | 1,500          | 3             |
+| 9     | 4             | 4,000          | 4             |
+| 10–13 | 5             | 10,000         | 5             |
+| 14–18 | 6             | 25,000         | 6             |
+| 19–23 | 7             | 60,000         | 8             |
+| 24–28 | 8             | 150,000        | 10            |
+
+The sign disappears after the 28th plot. No later expansion is advertised.
+
+During visits, the sale sign and purchase offer are hidden, but the complete
+current farm topology remains visible. Visitors see all 9 plots while the farm
+is 3×3 and all 28 plots after the 7×4 expansion, including which plots remain
+locked. Locked plots have no purchase or gameplay action; normal care,
+pest-removal and theft rules continue only for eligible unlocked crops. Farm
+size does not add a new cap to care rewards: every eligible plot may still
+reward during the current visitor-farm care cycle.
+
 ## Planting
 
 A player may plant when:
@@ -240,7 +296,7 @@ The player visits to discover the current farm state.
 
 A visit should eventually remain meaningful even when no theft is available.
 
-## Plot care
+## Plot care 1
 
 Plot care is available only when:
 

@@ -25,6 +25,8 @@ public class AppDbContext : DbContext
         Set<VisitorFarmCareCycle>();
     public DbSet<PestRemovalCompletion> PestRemovalCompletions =>
         Set<PestRemovalCompletion>();
+    public DbSet<LandPurchaseCompletion> LandPurchaseCompletions =>
+        Set<LandPurchaseCompletion>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -265,9 +267,79 @@ public class AppDbContext : DbContext
             });
         });
 
+        modelBuilder.Entity<LandPurchaseCompletion>(entity =>
+        {
+            entity.HasIndex(completion => new
+                {
+                    completion.BuyerUserId,
+                    completion.IdempotencyKey
+                })
+                .IsUnique();
+
+            entity.HasIndex(completion => completion.PlotId)
+                .IsUnique();
+
+            entity.HasIndex(completion => new
+                {
+                    completion.FarmId,
+                    completion.PlotNumber
+                })
+                .IsUnique();
+
+            entity.HasOne(completion => completion.BuyerUser)
+                .WithMany()
+                .HasForeignKey(completion => completion.BuyerUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(completion => completion.Farm)
+                .WithMany()
+                .HasForeignKey(completion => new
+                {
+                    completion.FarmId,
+                    completion.BuyerUserId
+                })
+                .HasPrincipalKey(farm => new { farm.Id, farm.UserId })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(completion => completion.Plot)
+                .WithMany()
+                .HasForeignKey(completion => new
+                {
+                    completion.PlotId,
+                    completion.FarmId
+                })
+                .HasPrincipalKey(plot => new { plot.Id, plot.FarmId })
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_LandPurchaseCompletions_PlotNumber_Range",
+                    "\"PlotNumber\" >= 7 AND \"PlotNumber\" <= 28");
+                table.HasCheckConstraint(
+                    "CK_LandPurchaseCompletions_PaymentCurrency_Valid",
+                    "\"PaymentCurrency\" IN ('coins', 'premiumCoins')");
+                table.HasCheckConstraint(
+                    "CK_LandPurchaseCompletions_AmountSpent_Positive",
+                    "\"AmountSpent\" > 0");
+                table.HasCheckConstraint(
+                    "CK_LandPurchaseCompletions_CoinsAfter_NonNegative",
+                    "\"CoinsAfter\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_LandPurchaseCompletions_PremiumCoinsAfter_NonNegative",
+                    "\"PremiumCoinsAfter\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_LandPurchaseCompletions_ExpansionMetadata_Consistent",
+                    "(\"PlotNumber\" = 9 AND \"AddedPlotCount\" = 19 AND \"ExpandedWidth\" = 7 AND \"ExpandedHeight\" = 4) OR (\"PlotNumber\" <> 9 AND \"AddedPlotCount\" = 0 AND \"ExpandedWidth\" IS NULL AND \"ExpandedHeight\" IS NULL)");
+            });
+        });
+
         modelBuilder.Entity<Plot>(entity =>
         {
             entity.Ignore(p => p.IsReady);
+
+            entity.HasIndex(p => new { p.FarmId, p.X, p.Y })
+                .IsUnique();
 
             entity.HasIndex(p => p.CareOpportunityId)
                 .IsUnique();
@@ -285,6 +357,9 @@ public class AppDbContext : DbContext
                 table.HasCheckConstraint(
                     "CK_Plots_PestConsumedAmount_NonNegative",
                     "\"PestConsumedAmount\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_Plots_Coordinates_NonNegative",
+                    "\"X\" >= 0 AND \"Y\" >= 0");
             });
         });
 
@@ -357,6 +432,19 @@ public class AppDbContext : DbContext
             entity.HasOne(i => i.Inventory)
                 .WithMany(i => i.Items)
                 .HasForeignKey(i => i.InventoryId);
+        });
+
+        modelBuilder.Entity<Inventory>(entity =>
+        {
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_Inventories_Coins_NonNegative",
+                    "\"Coins\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_Inventories_PremiumCoins_NonNegative",
+                    "\"PremiumCoins\" >= 0");
+            });
         });
 
         modelBuilder.Entity<TheftLog>()

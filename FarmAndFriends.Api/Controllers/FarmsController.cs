@@ -18,17 +18,20 @@ public class FarmsController : ControllerBase
     private readonly FriendshipService _friendshipService;
     private readonly CropCareService _cropCareService;
     private readonly PestService _pestService;
+    private readonly LandExpansionService _landExpansionService;
 
     public FarmsController(
         AppDbContext context,
         FriendshipService friendshipService,
         CropCareService cropCareService,
-        PestService pestService)
+        PestService pestService,
+        LandExpansionService landExpansionService)
     {
         _context = context;
         _friendshipService = friendshipService;
         _cropCareService = cropCareService;
         _pestService = pestService;
+        _landExpansionService = landExpansionService;
     }
 
     [HttpGet("my")]
@@ -60,7 +63,8 @@ public class FarmsController : ControllerBase
             farm,
             now,
             careStates,
-            _pestService.GetNextPestCheckAt(farm.Plots, now)));
+            _pestService.GetNextPestCheckAt(farm.Plots, now),
+            _landExpansionService.GetOffer(farm.Id, farm.Plots)));
     }
 
     [HttpGet("{farmId}")]
@@ -103,7 +107,9 @@ public class FarmsController : ControllerBase
             farm,
             now,
             careStates,
-            _pestService.GetNextPestCheckAt(farm.Plots, now)));
+            _pestService.GetNextPestCheckAt(farm.Plots, now),
+            landOffer: null,
+            isOwnerView: false));
     }
 
     [HttpGet("{farmId}/theft-log")]

@@ -55,11 +55,13 @@ namespace FarmAndFriends.Api.Migrations
                 {
                     Id = table.Column<Guid>(type: "uuid", nullable: false),
                     Name = table.Column<string>(type: "text", nullable: false),
-                    UserId = table.Column<Guid>(type: "uuid", nullable: false)
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    LastPestInfestationAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Farms", x => x.Id);
+                    table.UniqueConstraint("AK_Farms_Id_UserId", x => new { x.Id, x.UserId });
                     table.ForeignKey(
                         name: "FK_Farms_Users_UserId",
                         column: x => x.UserId,
@@ -117,12 +119,52 @@ namespace FarmAndFriends.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Inventories", x => x.Id);
+                    table.CheckConstraint("CK_Inventories_Coins_NonNegative", "\"Coins\" >= 0");
+                    table.CheckConstraint("CK_Inventories_PremiumCoins_NonNegative", "\"PremiumCoins\" >= 0");
                     table.ForeignKey(
                         name: "FK_Inventories_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PestRemovalCompletions",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    PestOccurrenceId = table.Column<Guid>(type: "uuid", nullable: false),
+                    IdempotencyKey = table.Column<Guid>(type: "uuid", nullable: false),
+                    ActorUserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    OwnerUserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    FarmId = table.Column<Guid>(type: "uuid", nullable: false),
+                    PlotId = table.Column<Guid>(type: "uuid", nullable: false),
+                    RemovedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    RemainingYieldAfter = table.Column<int>(type: "integer", nullable: true),
+                    CoinsGained = table.Column<int>(type: "integer", nullable: false),
+                    XpGained = table.Column<int>(type: "integer", nullable: false),
+                    CoinsAfter = table.Column<int>(type: "integer", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PestRemovalCompletions", x => x.Id);
+                    table.CheckConstraint("CK_PestRemovalCompletions_CoinsAfter_NonNegative", "\"CoinsAfter\" >= 0");
+                    table.CheckConstraint("CK_PestRemovalCompletions_CoinsGained_NonNegative", "\"CoinsGained\" >= 0");
+                    table.CheckConstraint("CK_PestRemovalCompletions_RemainingYield_Positive", "\"RemainingYieldAfter\" IS NULL OR \"RemainingYieldAfter\" >= 1");
+                    table.CheckConstraint("CK_PestRemovalCompletions_XpGained_NonNegative", "\"XpGained\" >= 0");
+                    table.ForeignKey(
+                        name: "FK_PestRemovalCompletions_Users_ActorUserId",
+                        column: x => x.ActorUserId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_PestRemovalCompletions_Users_OwnerUserId",
+                        column: x => x.OwnerUserId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -160,11 +202,25 @@ namespace FarmAndFriends.Api.Migrations
                     PlantedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     ReadyAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     RemainingYield = table.Column<int>(type: "integer", nullable: true),
-                    CareOpportunityId = table.Column<Guid>(type: "uuid", nullable: true)
+                    CareOpportunityId = table.Column<Guid>(type: "uuid", nullable: true),
+                    PestOccurrenceId = table.Column<Guid>(type: "uuid", nullable: true),
+                    PestType = table.Column<int>(type: "integer", nullable: true),
+                    PestStatus = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
+                    PestScheduledAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    PestAppearsAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    PestAppearedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    PestConsumesAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    PestResolvedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    PestConsumedAmount = table.Column<int>(type: "integer", nullable: false),
+                    ProtectedUntil = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Plots", x => x.Id);
+                    table.UniqueConstraint("AK_Plots_Id_FarmId", x => new { x.Id, x.FarmId });
+                    table.CheckConstraint("CK_Plots_Coordinates_NonNegative", "\"X\" >= 0 AND \"Y\" >= 0");
+                    table.CheckConstraint("CK_Plots_PestConsumedAmount_NonNegative", "\"PestConsumedAmount\" >= 0");
+                    table.CheckConstraint("CK_Plots_RemainingYield_Positive", "\"RemainingYield\" IS NULL OR \"RemainingYield\" >= 1");
                     table.ForeignKey(
                         name: "FK_Plots_Farms_FarmId",
                         column: x => x.FarmId,
@@ -231,6 +287,54 @@ namespace FarmAndFriends.Api.Migrations
                         principalTable: "Inventories",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "LandPurchaseCompletions",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    IdempotencyKey = table.Column<Guid>(type: "uuid", nullable: false),
+                    BuyerUserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    FarmId = table.Column<Guid>(type: "uuid", nullable: false),
+                    PlotId = table.Column<Guid>(type: "uuid", nullable: false),
+                    PlotNumber = table.Column<int>(type: "integer", nullable: false),
+                    PaymentCurrency = table.Column<string>(type: "text", nullable: false),
+                    AmountSpent = table.Column<int>(type: "integer", nullable: false),
+                    CoinsAfter = table.Column<int>(type: "integer", nullable: false),
+                    PremiumCoinsAfter = table.Column<int>(type: "integer", nullable: false),
+                    AddedPlotCount = table.Column<int>(type: "integer", nullable: false),
+                    ExpandedWidth = table.Column<int>(type: "integer", nullable: true),
+                    ExpandedHeight = table.Column<int>(type: "integer", nullable: true),
+                    PurchasedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_LandPurchaseCompletions", x => x.Id);
+                    table.CheckConstraint("CK_LandPurchaseCompletions_AmountSpent_Positive", "\"AmountSpent\" > 0");
+                    table.CheckConstraint("CK_LandPurchaseCompletions_CoinsAfter_NonNegative", "\"CoinsAfter\" >= 0");
+                    table.CheckConstraint("CK_LandPurchaseCompletions_ExpansionMetadata_Consistent", "(\"PlotNumber\" = 9 AND \"AddedPlotCount\" = 19 AND \"ExpandedWidth\" = 7 AND \"ExpandedHeight\" = 4) OR (\"PlotNumber\" <> 9 AND \"AddedPlotCount\" = 0 AND \"ExpandedWidth\" IS NULL AND \"ExpandedHeight\" IS NULL)");
+                    table.CheckConstraint("CK_LandPurchaseCompletions_PaymentCurrency_Valid", "\"PaymentCurrency\" IN ('coins', 'premiumCoins')");
+                    table.CheckConstraint("CK_LandPurchaseCompletions_PlotNumber_Range", "\"PlotNumber\" >= 7 AND \"PlotNumber\" <= 28");
+                    table.CheckConstraint("CK_LandPurchaseCompletions_PremiumCoinsAfter_NonNegative", "\"PremiumCoinsAfter\" >= 0");
+                    table.ForeignKey(
+                        name: "FK_LandPurchaseCompletions_Farms_FarmId_BuyerUserId",
+                        columns: x => new { x.FarmId, x.BuyerUserId },
+                        principalTable: "Farms",
+                        principalColumns: new[] { "Id", "UserId" },
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_LandPurchaseCompletions_Plots_PlotId_FarmId",
+                        columns: x => new { x.PlotId, x.FarmId },
+                        principalTable: "Plots",
+                        principalColumns: new[] { "Id", "FarmId" },
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_LandPurchaseCompletions_Users_BuyerUserId",
+                        column: x => x.BuyerUserId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -328,6 +432,7 @@ namespace FarmAndFriends.Api.Migrations
                     FriendshipId = table.Column<Guid>(type: "uuid", nullable: true),
                     TheftLogId = table.Column<Guid>(type: "uuid", nullable: true),
                     CareOpportunityId = table.Column<Guid>(type: "uuid", nullable: true),
+                    PestPlotId = table.Column<Guid>(type: "uuid", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     ReadAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
@@ -444,6 +549,34 @@ namespace FarmAndFriends.Api.Migrations
                 column: "InventoryId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_LandPurchaseCompletions_BuyerUserId_IdempotencyKey",
+                table: "LandPurchaseCompletions",
+                columns: new[] { "BuyerUserId", "IdempotencyKey" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_LandPurchaseCompletions_FarmId_BuyerUserId",
+                table: "LandPurchaseCompletions",
+                columns: new[] { "FarmId", "BuyerUserId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_LandPurchaseCompletions_FarmId_PlotNumber",
+                table: "LandPurchaseCompletions",
+                columns: new[] { "FarmId", "PlotNumber" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_LandPurchaseCompletions_PlotId",
+                table: "LandPurchaseCompletions",
+                column: "PlotId",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_LandPurchaseCompletions_PlotId_FarmId",
+                table: "LandPurchaseCompletions",
+                columns: new[] { "PlotId", "FarmId" });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Notifications_ActorUserId",
                 table: "Notifications",
                 column: "ActorUserId");
@@ -458,6 +591,11 @@ namespace FarmAndFriends.Api.Migrations
                 name: "IX_Notifications_FriendshipId",
                 table: "Notifications",
                 column: "FriendshipId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Notifications_PestPlotId_CreatedAt",
+                table: "Notifications",
+                columns: new[] { "PestPlotId", "CreatedAt" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_Notifications_RecipientUserId_ReadAt_CreatedAt",
@@ -481,15 +619,43 @@ namespace FarmAndFriends.Api.Migrations
                 columns: new[] { "Type", "ActorUserId", "RecipientUserId", "CreatedAt" });
 
             migrationBuilder.CreateIndex(
+                name: "IX_PestRemovalCompletions_ActorUserId_IdempotencyKey",
+                table: "PestRemovalCompletions",
+                columns: new[] { "ActorUserId", "IdempotencyKey" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PestRemovalCompletions_ActorUserId_RemovedAt",
+                table: "PestRemovalCompletions",
+                columns: new[] { "ActorUserId", "RemovedAt" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PestRemovalCompletions_OwnerUserId",
+                table: "PestRemovalCompletions",
+                column: "OwnerUserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PestRemovalCompletions_PestOccurrenceId",
+                table: "PestRemovalCompletions",
+                column: "PestOccurrenceId",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Plots_CareOpportunityId",
                 table: "Plots",
                 column: "CareOpportunityId",
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_Plots_FarmId",
+                name: "IX_Plots_FarmId_X_Y",
                 table: "Plots",
-                column: "FarmId");
+                columns: new[] { "FarmId", "X", "Y" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Plots_PestOccurrenceId",
+                table: "Plots",
+                column: "PestOccurrenceId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_RefreshTokens_UserId",
@@ -553,7 +719,13 @@ namespace FarmAndFriends.Api.Migrations
                 name: "InventoryItems");
 
             migrationBuilder.DropTable(
+                name: "LandPurchaseCompletions");
+
+            migrationBuilder.DropTable(
                 name: "Notifications");
+
+            migrationBuilder.DropTable(
+                name: "PestRemovalCompletions");
 
             migrationBuilder.DropTable(
                 name: "RefreshTokens");

@@ -6,6 +6,7 @@ using FarmAndFriends.Api.Domain.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
 using FarmAndFriends.Api.Domain.Enums;
+using FarmAndFriends.Api.Domain.Rules;
 
 namespace FarmAndFriends.Api.Controllers;
 
@@ -131,31 +132,8 @@ public class AuthController : ControllerBase
             UserId = user.Id
         };
 
-        // 🌱 Grid 3x3
-        const int width = 3;
-        const int height = 3;
-        const int unlockedPlots = 6;
-
-        int counter = 0;
-
-        for (int y = 0; y < height; y++)
-        {
-            for (int x = 0; x < width; x++)
-            {
-                farm.Plots.Add(new Plot
-                {
-                    Id = Guid.NewGuid(),
-                    X = x,
-                    Y = y,
-                    Unlocked = counter < unlockedPlots,
-                    SeedId = null,
-                    PlantedAt = null,
-                    ReadyAt = null
-                });
-
-                counter++;
-            }
-        }
+        foreach (var plot in FarmLayoutRules.CreateInitialPlots(farm.Id))
+            farm.Plots.Add(plot);
 
         // 🧰 Inventário inicial
         var inventory = new Inventory

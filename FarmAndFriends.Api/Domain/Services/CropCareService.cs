@@ -87,7 +87,9 @@ public sealed class CropCareService
             CancellationToken cancellationToken = default)
     {
         var currentPlots = plots
-            .Where(plot => plot.CareOpportunityId.HasValue)
+            .Where(plot =>
+                plot.Unlocked
+                && plot.CareOpportunityId.HasValue)
             .ToList();
 
         if (currentPlots.Count == 0)
@@ -236,17 +238,6 @@ public sealed class CropCareService
         Guid idempotencyKey,
         CancellationToken cancellationToken = default)
     {
-        var persistedAttempt = await FindPersistedAttemptAsync(
-            visitorUserId,
-            farmId,
-            plotId,
-            opportunityId,
-            idempotencyKey,
-            cancellationToken);
-
-        if (persistedAttempt != null)
-            return persistedAttempt;
-
         await using var transaction =
             await _context.Database.BeginTransactionAsync(cancellationToken);
 
@@ -258,8 +249,19 @@ public sealed class CropCareService
                     && candidate.FarmId == farmId,
                 cancellationToken);
 
-        if (plotSnapshot == null)
+        if (plotSnapshot == null || !plotSnapshot.Unlocked)
             return CropCareAttempt.Failed(CropCareFailure.PlotNotFound);
+
+        var persistedAttempt = await FindPersistedAttemptAsync(
+            visitorUserId,
+            farmId,
+            plotId,
+            opportunityId,
+            idempotencyKey,
+            cancellationToken);
+
+        if (persistedAttempt != null)
+            return persistedAttempt;
 
         var ownerUserId = plotSnapshot.Farm.UserId;
         if (ownerUserId == visitorUserId)
@@ -299,7 +301,7 @@ public sealed class CropCareService
                 """)
             .SingleOrDefaultAsync(cancellationToken);
 
-        if (plot == null)
+        if (plot == null || !plot.Unlocked)
             return CropCareAttempt.Failed(CropCareFailure.PlotNotFound);
 
         // Re-read the durable ledger after all contended locks.

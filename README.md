@@ -50,8 +50,13 @@ Em um novo terminal PowerShell, execute:
 ---
 
 ## ⚙️ Infraestrutura 
-(Opcional) Para resetar a base de dados, acesse a pasta infra/database e execute:
-  `./reset-database.ps1`
+(Opcional) Para apagar o volume local descartável, recriar o PostgreSQL e
+reaplicar as migrations versionadas, execute na raiz do projeto:
+
+  `./infra/database/reset-database.ps1`
+
+Esse comando remove todos os dados locais. Ele não apaga nem regenera arquivos
+de migration e não inicia a API; use `./run_api.ps1` depois do reset.
 
 ---
 

@@ -155,8 +155,7 @@ de recompensa ou desabilitar a feature sem remover dados históricos.
 
 ## Validação concluída
 
-- migration `20260802000427_AddPestRemovalRewards` aplicada em PostgreSQL
-  temporário isolado;
+- schema atual aplicado em PostgreSQL temporário isolado;
 - suíte backend completa: 96 aprovados, zero falhas e zero ignorados;
 - testes de pragas: 74 aprovados;
 - testes focados da recompensa e da precondição de ocorrência: 9 aprovados;

@@ -13,7 +13,7 @@ The reasoning behind major technical choices belongs in `docs/decisions/`.
 
 Status: Active
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-08-11
 
 ## System overview
 
@@ -469,6 +469,87 @@ Every event must document:
 Events must not carry mutable Phaser objects.
 
 Prefer stable identifiers and serializable payloads.
+
+## Land expansion contract and concurrency
+
+Land expansion is a server-authoritative economic mutation. The canonical
+3×3 and 7-column × 4-row coordinate sets, unlock order, level gates and prices
+are resolved by backend rules. React and Phaser never select the next plot or
+derive a price from coordinates.
+
+`GET /farms/my` adds an optional `landOffer` containing the next plot ID,
+progress number, minimum level, both server prices and the optional 7×4
+transition. A public farm response has no offer, but includes every persisted
+plot in the owner's current topology. Visitors therefore see all 9 plots of a
+3×3 farm or all 28 plots after the 7×4 expansion, including their authoritative
+`unlocked` state, without receiving prices or a purchase action.
+
+Purchases use:
+
+```http
+POST /plots/{plotId}/purchase
+Idempotency-Key: <uuid>
+Content-Type: application/json
+
+{ "paymentCurrency": "coins" }
+```
+
+Only the choice between `coins` and `premiumCoins` is client input. The
+authenticated buyer, farm ownership, current offer, level, amount, balance and
+topology are loaded and revalidated by the backend under lock.
+
+The transaction owns:
+
+```text
+Buyer User lock
+-> Farm lock
+-> stable Plot locks
+-> current-offer validation
+-> Inventory lock
+-> one currency debit
+-> one plot unlock
+-> optional insertion of 19 locked plots
+-> LandPurchaseCompletion
+-> Commit
+```
+
+`LandPurchaseCompletion` is both an audit record and the durable idempotency
+ledger. `(BuyerUserId, IdempotencyKey)`, `PlotId` and
+`(FarmId, PlotNumber)` are unique. Composite foreign keys prove that the buyer
+owns the recorded farm and that the recorded plot belongs to that same farm.
+Checks restrict currency, positive spend, non-negative post-purchase balances
+and expansion metadata: plot 9 must record exactly 19 added plots and 7×4;
+every other purchase must record no topology change. A retry of the same plot
+and payment currency replays the persisted result; reusing the key for another
+command is rejected. The coordinate index `(FarmId, X, Y)` prevents a
+concurrent 3×3-to-7×4 transition from creating duplicate plots.
+
+The current development baseline creates the final schema, constraints,
+indexes and seed catalog directly. It supports only the canonical 3×3 and 7×4
+layouts and does not contain upgrade paths for discarded prototype layouts.
+`LandPurchaseCompletion.PlotNumber` is the purchase ordinal in the single
+canonical sequence defined by `FarmLayoutRules`.
+
+Future persistent-model changes use incremental migrations from this baseline.
+Resetting disposable development data recreates the PostgreSQL volume and
+reapplies the versioned migrations; it never regenerates migration history.
+
+React keeps one idempotency key for the active `plotId + paymentCurrency`
+attempt. The detailed purchase panel requires an explicit payment-route choice,
+then its `Buy` action starts the POST without an intermediate review screen. A
+successful POST first enters a reconciliation state; success is shown and the
+key is discarded only after
+an authoritative farm snapshot contains the purchased plot as unlocked. A
+failed farm refresh retains the key for an idempotent replay. Inventory is
+refreshed best-effort after the farm is reconciled. A transition closes the old
+anchored modal before the 7×4 snapshot is synchronized and reports progress or
+failure outside that modal.
+
+Phaser preloads one sale-sign texture and derives its presence exclusively from
+`farm.landOffer.plotId`. `farm:sync` creates, moves or removes the sprite
+idempotently; a topology change uses the existing scene restart path. The sign
+is static, keeps using the plot's existing `plot:click` intent and introduces
+no new bridge event or direct API call.
 
 ## Plot care contract and timing
 

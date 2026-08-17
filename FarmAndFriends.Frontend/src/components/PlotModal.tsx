@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { authFetch } from '../api/http'
+import { hasFarmExpansion, getLandPurchaseSuccessMessage } from '../land/landPurchase'
+import type { LandPurchaseAttemptStore } from '../land/useLandPurchase'
 import { useFarm } from '../farm/useFarmContext'
 import {
   confirmedPestRemovalPatch,
@@ -15,6 +17,7 @@ import type {
   ApplyPestProtectionResponse,
   CareResponse,
   HarvestResponse,
+  LandPurchaseResponse,
   PestActionResponse,
   PlantResponse,
   PlotPestRemoveDone,
@@ -23,12 +26,21 @@ import type {
 import { useUser } from '../user/useUser'
 import { hasServerPestProtection } from '../utils/pests'
 import { formatCountdown, formatTimeRemaining } from '../utils/time'
+import { LandPurchasePanel } from './LandPurchasePanel'
 
 const NATURAL_REPELLENT_ID = 'natural_repellent'
 
 type Props = {
   plotId: string
   onClose: () => void
+  landPurchaseAttemptStore: LandPurchaseAttemptStore
+  onBusyChange?: (busy: boolean) => void
+  onLandPurchaseFeedback?: (feedback: LandPurchaseFeedback) => void
+}
+
+export type LandPurchaseFeedback = {
+  type: 'pending' | 'success' | 'error'
+  message: string
 }
 
 type PendingAction =
@@ -48,7 +60,13 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
-export function PlotModal({ plotId, onClose }: Props) {
+export function PlotModal({
+  plotId,
+  onClose,
+  landPurchaseAttemptStore,
+  onBusyChange,
+  onLandPurchaseFeedback,
+}: Props) {
   const {
     farm,
     refreshFarm,
@@ -59,18 +77,25 @@ export function PlotModal({ plotId, onClose }: Props) {
   const { getSeed } = useSeeds()
   const { inventory, refreshInventory } = useInventory()
   const { getItem } = useShopItems()
-  const { addXp, refreshUser } = useUser()
+  const { user, addXp, refreshUser } = useUser()
   const dialogRef = useRef<HTMLDivElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const pestRemovalAttemptRef = useRef<PestRemovalAttempt | null>(null)
+  const actionBusyRef = useRef(false)
 
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const [confirmProtection, setConfirmProtection] = useState(false)
+  const [landPurchasePending, setLandPurchasePending] = useState(false)
   const [currentTime, setCurrentTime] = useState(Date.now)
+  const handleLandPurchasePending = useCallback((pending: boolean) => {
+    setLandPurchasePending(pending)
+    onBusyChange?.(pending)
+  }, [onBusyChange])
 
   const plot = farm?.plots.find(candidate => candidate.id === plotId)
   const farmId = farm?.id
+  const landOffer = farm?.landOffer ?? null
   const care = plot?.care
   const nextCareAt = care?.nextCareAt
   const careCycleEndsAt = care?.careCycleEndsAt
@@ -124,6 +149,8 @@ export function PlotModal({ plotId, onClose }: Props) {
       && repellent !== undefined
       && repellentQuantity > 0,
   )
+  const actionBusy = pendingAction !== null || landPurchasePending
+  actionBusyRef.current = actionBusy
 
   useEffect(() => {
     if (
@@ -151,7 +178,7 @@ export function PlotModal({ plotId, onClose }: Props) {
     closeButtonRef.current?.focus()
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape' && !actionBusyRef.current) onClose()
     }
 
     window.addEventListener('keydown', closeOnEscape)
@@ -185,7 +212,7 @@ export function PlotModal({ plotId, onClose }: Props) {
   }
 
   async function handlePlant(seedId: string) {
-    if (isVisiting || pendingAction) return
+    if (plot?.unlocked !== true || isVisiting || pendingAction) return
 
     setFeedback(null)
     setPendingAction('plant')
@@ -215,7 +242,7 @@ export function PlotModal({ plotId, onClose }: Props) {
   }
 
   async function handleHarvest() {
-    if (isVisiting || pendingAction) return
+    if (plot?.unlocked !== true || isVisiting || pendingAction) return
 
     setFeedback(null)
     setPendingAction('harvest')
@@ -247,7 +274,14 @@ export function PlotModal({ plotId, onClose }: Props) {
   }
 
   async function handleSteal() {
-    if (!isVisiting || !farmId || pendingAction) return
+    if (
+      plot?.unlocked !== true
+      || !isVisiting
+      || !farmId
+      || pendingAction
+    ) {
+      return
+    }
 
     setFeedback(null)
     setPendingAction('steal')
@@ -293,6 +327,7 @@ export function PlotModal({ plotId, onClose }: Props) {
   async function handleCare() {
     if (
       !isVisiting
+      || plot?.unlocked !== true
       || !farmId
       || !careOpportunityId
       || pendingAction
@@ -339,11 +374,14 @@ export function PlotModal({ plotId, onClose }: Props) {
   }
 
   async function handleRemovePest() {
-    if (!farmId || pendingAction || !plot?.pest?.canRemove) return
+    const pest = plot?.pest
+    if (plot?.unlocked !== true || !farmId || pendingAction || !pest?.canRemove) {
+      return
+    }
 
     setFeedback(null)
     setPendingAction('remove-pest')
-    const pestOccurrenceId = plot.pest.occurrenceId
+    const pestOccurrenceId = pest.occurrenceId
 
     if (pestOccurrenceId === null) {
       setFeedback({
@@ -465,7 +503,75 @@ export function PlotModal({ plotId, onClose }: Props) {
     }
   }
 
-  const actionBusy = pendingAction !== null
+  function handleLandPurchaseConfirmed(response: LandPurchaseResponse) {
+    const message = getLandPurchaseSuccessMessage(response)
+
+    if (hasFarmExpansion(response)) {
+      onLandPurchaseFeedback?.({ type: 'success', message })
+      return
+    }
+
+    setFeedback({ type: 'success', message })
+  }
+
+  function handleLandPurchaseReconciliationStarted(
+    response: LandPurchaseResponse,
+  ) {
+    if (!hasFarmExpansion(response)) return
+
+    onLandPurchaseFeedback?.({
+      type: 'pending',
+      message: `Atualizando a fazenda com o lote ${response.plotNumber}...`,
+    })
+    onClose()
+  }
+
+  function handleLandPurchaseReconciliationFailed(
+    response: LandPurchaseResponse,
+    message: string,
+  ) {
+    if (!hasFarmExpansion(response)) return
+    onLandPurchaseFeedback?.({ type: 'error', message })
+  }
+
+  async function reconcileLandPurchase(
+    response: LandPurchaseResponse,
+  ) {
+    let reconciled = false
+
+    function onFarmSynchronized(event: Event) {
+      if (!(event instanceof CustomEvent)) return
+
+      const detail: unknown = event.detail
+      if (!detail || typeof detail !== 'object' || !('plots' in detail)) return
+      if (!Array.isArray(detail.plots)) return
+
+      reconciled = detail.plots.some((candidate: unknown) => (
+        candidate !== null
+        && typeof candidate === 'object'
+        && 'id' in candidate
+        && candidate.id === response.plotId
+        && 'unlocked' in candidate
+        && candidate.unlocked === true
+      ))
+    }
+
+    window.addEventListener('farm:sync', onFarmSynchronized)
+    window.addEventListener('farm:change', onFarmSynchronized)
+
+    try {
+      await refreshFarm()
+      if (!reconciled) {
+        throw new Error(
+          'A compra foi recebida, mas n\u00e3o foi poss\u00edvel atualizar a fazenda. Tente novamente pela placa.',
+        )
+      }
+    } finally {
+      window.removeEventListener('farm:sync', onFarmSynchronized)
+      window.removeEventListener('farm:change', onFarmSynchronized)
+    }
+  }
+
   const activePest = plot.pest?.status === 'active'
 
   return (
@@ -474,6 +580,7 @@ export function PlotModal({ plotId, onClose }: Props) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="plot-modal-title"
+      aria-busy={actionBusy}
       className="plot-modal w-72 max-w-[calc(100vw-2rem)]"
       onPointerDown={event => event.stopPropagation()}
       onKeyDown={keepFocusInside}
@@ -485,7 +592,10 @@ export function PlotModal({ plotId, onClose }: Props) {
         <button
           ref={closeButtonRef}
           type="button"
-          onClick={onClose}
+          onClick={() => {
+            if (!actionBusy) onClose()
+          }}
+          disabled={actionBusy}
           className="-mr-1 -mt-1 rounded-full px-2 py-1 text-lg leading-none text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
           aria-label="Fechar detalhes do lote"
         >
@@ -497,7 +607,24 @@ export function PlotModal({ plotId, onClose }: Props) {
         <p className="text-sm text-red-600">🔒 Terreno bloqueado</p>
       )}
 
-      {isProtected && protectionTimeLeft && (
+      {!isVisiting && landOffer?.plotId === plotId && (
+        <LandPurchasePanel
+          key={landOffer.plotId}
+          offer={landOffer}
+          coins={inventory?.coins ?? null}
+          premiumCoins={inventory?.premiumCoins ?? null}
+          playerLevel={user?.level ?? null}
+          attemptStore={landPurchaseAttemptStore}
+          refreshFarm={reconcileLandPurchase}
+          refreshInventory={refreshInventory}
+          onReconciliationStarted={handleLandPurchaseReconciliationStarted}
+          onReconciliationFailed={handleLandPurchaseReconciliationFailed}
+          onConfirmed={handleLandPurchaseConfirmed}
+          onPendingChange={handleLandPurchasePending}
+        />
+      )}
+
+      {plot.unlocked && isProtected && protectionTimeLeft && (
         <div className="mb-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800">
           🛡️ Protegido contra pragas por {protectionTimeLeft}
         </div>
@@ -529,7 +656,7 @@ export function PlotModal({ plotId, onClose }: Props) {
         <p className="text-sm text-gray-500">Este lote está vazio.</p>
       )}
 
-      {plot.seedId && seedCatalog && (
+      {plot.unlocked && plot.seedId && seedCatalog && (
         <>
           <p className="mb-2 text-xs">{seedCatalog.icon} {seedCatalog.name}</p>
           {activePest && (
