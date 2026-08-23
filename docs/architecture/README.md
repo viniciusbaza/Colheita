@@ -13,7 +13,7 @@ The reasoning behind major technical choices belongs in `docs/decisions/`.
 
 Status: Active
 
-Last reviewed: 2026-08-11
+Last reviewed: 2026-08-18
 
 ## System overview
 
@@ -513,8 +513,8 @@ Buyer User lock
 -> Commit
 ```
 
-`LandPurchaseCompletion` is both an audit record and the durable idempotency
-ledger. `(BuyerUserId, IdempotencyKey)`, `PlotId` and
+`LandPurchaseCompletion` is the durable gameplay completion and idempotency
+record. `(BuyerUserId, IdempotencyKey)`, `PlotId` and
 `(FarmId, PlotNumber)` are unique. Composite foreign keys prove that the buyer
 owns the recorded farm and that the recorded plot belongs to that same farm.
 Checks restrict currency, positive spend, non-negative post-purchase balances
@@ -523,6 +523,37 @@ every other purchase must record no topology change. A retry of the same plot
 and payment currency replays the persisted result; reusing the key for another
 command is rejected. The coordinate index `(FarmId, X, Y)` prevents a
 concurrent 3×3-to-7×4 transition from creating duplicate plots.
+
+Premium payment additionally creates a `PremiumCurrencyTransaction` linked
+one-to-one from the completion. Its persisted key is
+`land-purchase:{request UUID}`. A replay must find both records linked and does
+not debit, unlock or expand again. Coin payment remains outside the premium
+ledger.
+
+## Premium currency ledger
+
+`Inventory.PremiumCoins` is the materialized current balance. It is never
+reconstructed on normal requests. Every production write to that property goes
+through `PremiumCurrencyService`, which requires a caller-owned EF transaction
+and locks the user's inventory after the established user/gameplay locks.
+
+Each movement creates one ordered `PremiumCurrencyTransaction`. Accounting
+uses its database-generated `LedgerSequence`; timestamps are informational.
+The persisted event is an explicit stable token. The operation fingerprint is
+SHA-256 over length-prefixed semantic fields, using invariant integer
+representations and canonical item ordering.
+
+Namespaced keys are unique per user. External provider/environment plus
+transaction ID is globally unique. Identical retries return `Replayed`;
+different semantics return conflict. Consequences of gameplay execute only for
+`Applied`. Premium purchase items are immutable snapshots with no catalog FK.
+Corrections create one integral compensating transaction linked through unique
+`ReversesTransactionId`.
+
+The application rejects update/delete of ledger rows in `AppDbContext`; this
+is application-level immutability, not protection from direct DBA access.
+Reconciliation verifies transaction sum, latest balance, and continuity
+against `Inventory.PremiumCoins`.
 
 The current development baseline creates the final schema, constraints,
 indexes and seed catalog directly. It supports only the canonical 3×3 and 7×4

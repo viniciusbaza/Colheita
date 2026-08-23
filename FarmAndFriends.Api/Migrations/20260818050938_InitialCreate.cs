@@ -1,5 +1,6 @@
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
@@ -168,6 +169,50 @@ namespace FarmAndFriends.Api.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "PremiumCurrencyTransactions",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    LedgerSequence = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityAlwaysColumn),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Amount = table.Column<int>(type: "integer", nullable: false),
+                    BalanceBefore = table.Column<int>(type: "integer", nullable: false),
+                    BalanceAfter = table.Column<int>(type: "integer", nullable: false),
+                    EventType = table.Column<string>(type: "character varying(60)", maxLength: 60, nullable: false),
+                    EventReference = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    IdempotencyKey = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
+                    OperationFingerprint = table.Column<string>(type: "character varying(67)", maxLength: 67, nullable: false),
+                    ExternalSource = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
+                    ExternalTransactionId = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
+                    ReversesTransactionId = table.Column<Guid>(type: "uuid", nullable: true),
+                    Metadata = table.Column<string>(type: "jsonb", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PremiumCurrencyTransactions", x => x.Id);
+                    table.CheckConstraint("CK_PremiumCurrencyTransactions_Amount_NonZero", "\"Amount\" <> 0");
+                    table.CheckConstraint("CK_PremiumCurrencyTransactions_Balance_Consistent", "\"BalanceAfter\" = \"BalanceBefore\" + \"Amount\"");
+                    table.CheckConstraint("CK_PremiumCurrencyTransactions_BalanceAfter_NonNegative", "\"BalanceAfter\" >= 0");
+                    table.CheckConstraint("CK_PremiumCurrencyTransactions_BalanceBefore_NonNegative", "\"BalanceBefore\" >= 0");
+                    table.CheckConstraint("CK_PremiumCurrencyTransactions_ExternalReference_Complete", "(\"ExternalSource\" IS NULL AND \"ExternalTransactionId\" IS NULL) OR (\"ExternalSource\" IS NOT NULL AND \"ExternalTransactionId\" IS NOT NULL)");
+                    table.CheckConstraint("CK_PremiumCurrencyTransactions_IdempotencyReference_Present", "\"IdempotencyKey\" IS NOT NULL OR \"ExternalSource\" IS NOT NULL");
+                    table.ForeignKey(
+                        name: "FK_PremiumCurrencyTransactions_PremiumCurrencyTransactions_Rev~",
+                        column: x => x.ReversesTransactionId,
+                        principalTable: "PremiumCurrencyTransactions",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_PremiumCurrencyTransactions_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "RefreshTokens",
                 columns: table => new
                 {
@@ -290,6 +335,30 @@ namespace FarmAndFriends.Api.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "PremiumCurrencyPurchaseItems",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    PremiumCurrencyTransactionId = table.Column<Guid>(type: "uuid", nullable: false),
+                    ItemIdSnapshot = table.Column<string>(type: "character varying(120)", maxLength: 120, nullable: false),
+                    ItemNameSnapshot = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    Quantity = table.Column<int>(type: "integer", nullable: false),
+                    UnitPremiumPrice = table.Column<int>(type: "integer", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PremiumCurrencyPurchaseItems", x => x.Id);
+                    table.CheckConstraint("CK_PremiumCurrencyPurchaseItems_Quantity_Positive", "\"Quantity\" > 0");
+                    table.CheckConstraint("CK_PremiumCurrencyPurchaseItems_UnitPrice_Positive", "\"UnitPremiumPrice\" > 0");
+                    table.ForeignKey(
+                        name: "FK_PremiumCurrencyPurchaseItems_PremiumCurrencyTransactions_Pr~",
+                        column: x => x.PremiumCurrencyTransactionId,
+                        principalTable: "PremiumCurrencyTransactions",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "LandPurchaseCompletions",
                 columns: table => new
                 {
@@ -298,6 +367,7 @@ namespace FarmAndFriends.Api.Migrations
                     BuyerUserId = table.Column<Guid>(type: "uuid", nullable: false),
                     FarmId = table.Column<Guid>(type: "uuid", nullable: false),
                     PlotId = table.Column<Guid>(type: "uuid", nullable: false),
+                    PremiumCurrencyTransactionId = table.Column<Guid>(type: "uuid", nullable: true),
                     PlotNumber = table.Column<int>(type: "integer", nullable: false),
                     PaymentCurrency = table.Column<string>(type: "text", nullable: false),
                     AmountSpent = table.Column<int>(type: "integer", nullable: false),
@@ -317,6 +387,7 @@ namespace FarmAndFriends.Api.Migrations
                     table.CheckConstraint("CK_LandPurchaseCompletions_PaymentCurrency_Valid", "\"PaymentCurrency\" IN ('coins', 'premiumCoins')");
                     table.CheckConstraint("CK_LandPurchaseCompletions_PlotNumber_Range", "\"PlotNumber\" >= 7 AND \"PlotNumber\" <= 28");
                     table.CheckConstraint("CK_LandPurchaseCompletions_PremiumCoinsAfter_NonNegative", "\"PremiumCoinsAfter\" >= 0");
+                    table.CheckConstraint("CK_LandPurchaseCompletions_PremiumLedger_Consistent", "(\"PaymentCurrency\" = 'premiumCoins' AND \"PremiumCurrencyTransactionId\" IS NOT NULL) OR (\"PaymentCurrency\" = 'coins' AND \"PremiumCurrencyTransactionId\" IS NULL)");
                     table.ForeignKey(
                         name: "FK_LandPurchaseCompletions_Farms_FarmId_BuyerUserId",
                         columns: x => new { x.FarmId, x.BuyerUserId },
@@ -328,6 +399,12 @@ namespace FarmAndFriends.Api.Migrations
                         columns: x => new { x.PlotId, x.FarmId },
                         principalTable: "Plots",
                         principalColumns: new[] { "Id", "FarmId" },
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_LandPurchaseCompletions_PremiumCurrencyTransactions_Premium~",
+                        column: x => x.PremiumCurrencyTransactionId,
+                        principalTable: "PremiumCurrencyTransactions",
+                        principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_LandPurchaseCompletions_Users_BuyerUserId",
@@ -541,7 +618,8 @@ namespace FarmAndFriends.Api.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_Inventories_UserId",
                 table: "Inventories",
-                column: "UserId");
+                column: "UserId",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_InventoryItems_InventoryId",
@@ -575,6 +653,12 @@ namespace FarmAndFriends.Api.Migrations
                 name: "IX_LandPurchaseCompletions_PlotId_FarmId",
                 table: "LandPurchaseCompletions",
                 columns: new[] { "PlotId", "FarmId" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_LandPurchaseCompletions_PremiumCurrencyTransactionId",
+                table: "LandPurchaseCompletions",
+                column: "PremiumCurrencyTransactionId",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "IX_Notifications_ActorUserId",
@@ -658,6 +742,49 @@ namespace FarmAndFriends.Api.Migrations
                 column: "PestOccurrenceId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_PremiumCurrencyPurchaseItems_PremiumCurrencyTransactionId",
+                table: "PremiumCurrencyPurchaseItems",
+                column: "PremiumCurrencyTransactionId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PremiumCurrencyTransactions_EventType_EventReference",
+                table: "PremiumCurrencyTransactions",
+                columns: new[] { "EventType", "EventReference" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PremiumCurrencyTransactions_ExternalSource_ExternalTransact~",
+                table: "PremiumCurrencyTransactions",
+                columns: new[] { "ExternalSource", "ExternalTransactionId" },
+                unique: true,
+                filter: "\"ExternalSource\" IS NOT NULL AND \"ExternalTransactionId\" IS NOT NULL");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PremiumCurrencyTransactions_LedgerSequence",
+                table: "PremiumCurrencyTransactions",
+                column: "LedgerSequence",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PremiumCurrencyTransactions_ReversesTransactionId",
+                table: "PremiumCurrencyTransactions",
+                column: "ReversesTransactionId",
+                unique: true,
+                filter: "\"ReversesTransactionId\" IS NOT NULL");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PremiumCurrencyTransactions_UserId_IdempotencyKey",
+                table: "PremiumCurrencyTransactions",
+                columns: new[] { "UserId", "IdempotencyKey" },
+                unique: true,
+                filter: "\"IdempotencyKey\" IS NOT NULL");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PremiumCurrencyTransactions_UserId_LedgerSequence",
+                table: "PremiumCurrencyTransactions",
+                columns: new[] { "UserId", "LedgerSequence" },
+                descending: new[] { false, true });
+
+            migrationBuilder.CreateIndex(
                 name: "IX_RefreshTokens_UserId",
                 table: "RefreshTokens",
                 column: "UserId");
@@ -728,6 +855,9 @@ namespace FarmAndFriends.Api.Migrations
                 name: "PestRemovalCompletions");
 
             migrationBuilder.DropTable(
+                name: "PremiumCurrencyPurchaseItems");
+
+            migrationBuilder.DropTable(
                 name: "RefreshTokens");
 
             migrationBuilder.DropTable(
@@ -741,6 +871,9 @@ namespace FarmAndFriends.Api.Migrations
 
             migrationBuilder.DropTable(
                 name: "TheftLogs");
+
+            migrationBuilder.DropTable(
+                name: "PremiumCurrencyTransactions");
 
             migrationBuilder.DropTable(
                 name: "Plots");

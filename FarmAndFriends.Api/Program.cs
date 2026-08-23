@@ -134,6 +134,9 @@ builder.Services.AddScoped<CropCareService>();
 builder.Services.AddScoped<PestService>();
 // Land expansion
 builder.Services.AddScoped<LandExpansionService>();
+// Premium currency ledger
+builder.Services.AddScoped<PremiumCurrencyService>();
+builder.Services.AddScoped<PremiumCurrencyReconciliationService>();
 builder.Services.AddSingleton(TimeProvider.System);
 
 // CORS Policy

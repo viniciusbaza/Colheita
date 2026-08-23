@@ -1,6 +1,7 @@
 using FarmAndFriends.Api.Configuration;
 using FarmAndFriends.Api.Contracts.Land;
 using FarmAndFriends.Api.Domain.Entities;
+using FarmAndFriends.Api.Domain.Enums;
 using FarmAndFriends.Api.Domain.Rules;
 using FarmAndFriends.Api.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -17,17 +18,20 @@ public sealed class LandExpansionService
     private readonly LandExpansionOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<LandExpansionService> _logger;
+    private readonly PremiumCurrencyService _premiumCurrencyService;
 
     public LandExpansionService(
         AppDbContext context,
         IOptions<LandExpansionOptions> options,
         TimeProvider timeProvider,
-        ILogger<LandExpansionService> logger)
+        ILogger<LandExpansionService> logger,
+        PremiumCurrencyService premiumCurrencyService)
     {
         _context = context;
         _options = options.Value;
         _timeProvider = timeProvider;
         _logger = logger;
+        _premiumCurrencyService = premiumCurrencyService;
     }
 
     public LandOfferResponse? GetOffer(
@@ -81,6 +85,42 @@ public sealed class LandExpansionService
                 return new(LandPurchaseFailure.IdempotencyKeyReused);
             }
 
+            if (paymentCurrency == LandPaymentCurrency.PremiumCoins)
+            {
+                if (!persisted.PremiumCurrencyTransactionId.HasValue)
+                {
+                    return EconomyInconsistent(
+                        "completion_missing_ledger_link",
+                        buyerUserId,
+                        plotId,
+                        idempotencyKey,
+                        persisted.Id);
+                }
+
+                var replay = await _premiumCurrencyService.DebitAsync(
+                    buyerUserId,
+                    persisted.AmountSpent,
+                    PremiumCurrencyEventType.LandPurchase,
+                    persisted.Id.ToString("D").ToLowerInvariant(),
+                    LandIdempotencyKey(idempotencyKey),
+                    cancellationToken: cancellationToken);
+                if (!replay.Succeeded
+                    || replay.Disposition
+                        != PremiumCurrencyOperationDisposition.Replayed
+                    || replay.Transaction?.Id
+                        != persisted.PremiumCurrencyTransactionId)
+                {
+                    return EconomyInconsistent(
+                        "completion_ledger_replay_mismatch",
+                        buyerUserId,
+                        plotId,
+                        idempotencyKey,
+                        persisted.Id,
+                        persisted.PremiumCurrencyTransactionId,
+                        replay.Failure);
+                }
+            }
+
             return new(
                 LandPurchaseFailure.None,
                 ToPurchaseResponse(persisted, replayed: true));
@@ -129,17 +169,6 @@ public sealed class LandExpansionService
         if (buyer.Level < offer.MinimumLevel)
             return new(LandPurchaseFailure.LevelRequired);
 
-        var inventory = await _context.Inventories
-            .FromSqlInterpolated(
-                $"""
-                SELECT * FROM "Inventories"
-                WHERE "UserId" = {buyerUserId}
-                FOR UPDATE
-                """)
-            .SingleOrDefaultAsync(cancellationToken);
-        if (inventory == null)
-            return new(LandPurchaseFailure.InventoryNotFound);
-
         var amountSpent = paymentCurrency switch
         {
             LandPaymentCurrency.Coins => offer.CoinsPrice,
@@ -148,17 +177,81 @@ public sealed class LandExpansionService
                 nameof(paymentCurrency))
         };
 
+        var completionId = Guid.NewGuid();
+        Inventory? inventory;
+        PremiumCurrencyTransaction? premiumTransaction = null;
         if (paymentCurrency == LandPaymentCurrency.Coins)
         {
+            inventory = await _context.LockInventoryAsync(
+                buyerUserId,
+                cancellationToken);
+            if (inventory == null)
+                return new(LandPurchaseFailure.InventoryNotFound);
             if (inventory.Coins < amountSpent)
                 return new(LandPurchaseFailure.InsufficientCoins);
             inventory.Coins -= amountSpent;
         }
         else
         {
-            if (inventory.PremiumCoins < amountSpent)
-                return new(LandPurchaseFailure.InsufficientPremiumCoins);
-            inventory.PremiumCoins -= amountSpent;
+            var debit = await _premiumCurrencyService.DebitAsync(
+                buyerUserId,
+                amountSpent,
+                PremiumCurrencyEventType.LandPurchase,
+                completionId.ToString("D").ToLowerInvariant(),
+                LandIdempotencyKey(idempotencyKey),
+                cancellationToken: cancellationToken);
+            if (!debit.Succeeded)
+            {
+                return new(debit.Failure switch
+                {
+                    PremiumCurrencyOperationFailure.InsufficientBalance =>
+                        LandPurchaseFailure.InsufficientPremiumCoins,
+                    PremiumCurrencyOperationFailure.InventoryNotFound =>
+                        LandPurchaseFailure.InventoryNotFound,
+                    PremiumCurrencyOperationFailure.IdempotencyConflict =>
+                        LandPurchaseFailure.IdempotencyKeyReused,
+                    _ => EconomyInconsistent(
+                        "premium_debit_failed",
+                        buyerUserId,
+                        plotId,
+                        idempotencyKey,
+                        completionId,
+                        debit.Transaction?.Id,
+                        debit.Failure).Failure
+                });
+            }
+
+            if (debit.Disposition == PremiumCurrencyOperationDisposition.Replayed)
+            {
+                var replayedCompletion = await _context.LandPurchaseCompletions
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(completion =>
+                            completion.PremiumCurrencyTransactionId
+                                == debit.Transaction!.Id,
+                        cancellationToken);
+                if (replayedCompletion == null
+                    || replayedCompletion.BuyerUserId != buyerUserId
+                    || replayedCompletion.PlotId != plotId
+                    || replayedCompletion.IdempotencyKey != idempotencyKey)
+                {
+                    return EconomyInconsistent(
+                        "ledger_replay_missing_matching_completion",
+                        buyerUserId,
+                        plotId,
+                        idempotencyKey,
+                        replayedCompletion?.Id,
+                        debit.Transaction!.Id);
+                }
+
+                return new(
+                    LandPurchaseFailure.None,
+                    ToPurchaseResponse(replayedCompletion, replayed: true));
+            }
+
+            premiumTransaction = debit.Transaction;
+            inventory = await _context.Inventories
+                .SingleAsync(candidate => candidate.UserId == buyerUserId,
+                    cancellationToken);
         }
 
         evaluation.OfferedPlot.Unlocked = true;
@@ -184,11 +277,12 @@ public sealed class LandExpansionService
         // cross-table/economic invariants are not duplicated in ledger checks.
         var completion = new LandPurchaseCompletion
         {
-            Id = Guid.NewGuid(),
+            Id = completionId,
             IdempotencyKey = idempotencyKey,
             BuyerUserId = buyerUserId,
             FarmId = farm.Id,
             PlotId = plotId,
+            PremiumCurrencyTransactionId = premiumTransaction?.Id,
             PlotNumber = offer.PlotNumber,
             PaymentCurrency = ToContractCurrency(paymentCurrency),
             AmountSpent = amountSpent,
@@ -269,6 +363,30 @@ public sealed class LandExpansionService
             ? CoinsCurrency
             : PremiumCoinsCurrency;
 
+    private static string LandIdempotencyKey(Guid idempotencyKey) =>
+        $"land-purchase:{idempotencyKey:D}".ToLowerInvariant();
+
+    private LandPurchaseAttempt EconomyInconsistent(
+        string reason,
+        Guid buyerUserId,
+        Guid plotId,
+        Guid idempotencyKey,
+        Guid? completionId = null,
+        Guid? premiumCurrencyTransactionId = null,
+        PremiumCurrencyOperationFailure? premiumFailure = null)
+    {
+        _logger.LogError(
+            "Premium land purchase economy inconsistency. Reason={Reason} BuyerUserId={BuyerUserId} PlotId={PlotId} IdempotencyKey={IdempotencyKey} CompletionId={CompletionId} PremiumCurrencyTransactionId={PremiumCurrencyTransactionId} PremiumFailure={PremiumFailure}",
+            reason,
+            buyerUserId,
+            plotId,
+            idempotencyKey,
+            completionId,
+            premiumCurrencyTransactionId,
+            premiumFailure);
+        return new(LandPurchaseFailure.EconomyInconsistent);
+    }
+
     private void LogUnsupportedLayout(
         Guid farmId,
         IEnumerable<Plot> plots)
@@ -298,7 +416,8 @@ public enum LandPurchaseFailure
     InsufficientPremiumCoins,
     UnsupportedLayout,
     InventoryNotFound,
-    IdempotencyKeyReused
+    IdempotencyKeyReused,
+    EconomyInconsistent
 }
 
 public sealed record LandPurchaseAttempt(

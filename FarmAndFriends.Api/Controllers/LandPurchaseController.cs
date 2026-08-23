@@ -112,6 +112,11 @@ public sealed class LandPurchaseController : ControllerBase
                 LandErrorCodes.IdempotencyKeyReused,
                 "Chave idempotente reutilizada",
                 "Este Idempotency-Key já foi usado para outra compra ou moeda."),
+            LandPurchaseFailure.EconomyInconsistent => LandProblem(
+                StatusCodes.Status503ServiceUnavailable,
+                LandErrorCodes.EconomyInconsistent,
+                "Compra premium temporariamente indisponível",
+                "Não foi possível confirmar a compra premium com segurança. Tente novamente mais tarde."),
             _ => Problem(statusCode: StatusCodes.Status500InternalServerError)
         };
 

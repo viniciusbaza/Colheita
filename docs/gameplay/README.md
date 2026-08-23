@@ -594,6 +594,17 @@ Premium currency must not provide direct dominance over other players.
 The game must not create severe artificial frustration primarily to sell its
 solution.
 
+The backend records every premium-currency movement from the initial account
+grant onward. The current balance remains in the inventory, while the premium
+ledger records why and when it changed. Standard coins are not part of this
+ledger.
+
+Retries of the same premium operation never repeat either the balance movement
+or its associated terrain, item or reward. Premium item purchase records keep
+historical item and price snapshots even if the catalog later changes.
+Corrections use a new integral compensating movement; v1 does not support
+partial refunds.
+
 ## Player feedback
 
 Harvesting, stealing and helping must have distinct feedback.

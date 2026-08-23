@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using FarmAndFriends.Api.Domain.Entities;
 using FarmAndFriends.Api.Domain.Enums;
+using FarmAndFriends.Api.Domain.Services;
 
 namespace FarmAndFriends.Api.Infrastructure.Data;
 
@@ -27,6 +28,32 @@ public class AppDbContext : DbContext
         Set<PestRemovalCompletion>();
     public DbSet<LandPurchaseCompletion> LandPurchaseCompletions =>
         Set<LandPurchaseCompletion>();
+    public DbSet<PremiumCurrencyTransaction> PremiumCurrencyTransactions =>
+        Set<PremiumCurrencyTransaction>();
+    public DbSet<PremiumCurrencyPurchaseItem> PremiumCurrencyPurchaseItems =>
+        Set<PremiumCurrencyPurchaseItem>();
+
+    public override int SaveChanges() => SaveChanges(true);
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        EnsurePremiumLedgerIsImmutable();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        CancellationToken cancellationToken = default) =>
+        SaveChangesAsync(true, cancellationToken);
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        EnsurePremiumLedgerIsImmutable();
+        return base.SaveChangesAsync(
+            acceptAllChangesOnSuccess,
+            cancellationToken);
+    }
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -286,6 +313,10 @@ public class AppDbContext : DbContext
                 })
                 .IsUnique();
 
+            entity.HasIndex(completion =>
+                    completion.PremiumCurrencyTransactionId)
+                .IsUnique();
+
             entity.HasOne(completion => completion.BuyerUser)
                 .WithMany()
                 .HasForeignKey(completion => completion.BuyerUserId)
@@ -311,6 +342,13 @@ public class AppDbContext : DbContext
                 .HasPrincipalKey(plot => new { plot.Id, plot.FarmId })
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne(completion =>
+                    completion.PremiumCurrencyTransaction)
+                .WithMany()
+                .HasForeignKey(completion =>
+                    completion.PremiumCurrencyTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.ToTable(table =>
             {
                 table.HasCheckConstraint(
@@ -331,6 +369,118 @@ public class AppDbContext : DbContext
                 table.HasCheckConstraint(
                     "CK_LandPurchaseCompletions_ExpansionMetadata_Consistent",
                     "(\"PlotNumber\" = 9 AND \"AddedPlotCount\" = 19 AND \"ExpandedWidth\" = 7 AND \"ExpandedHeight\" = 4) OR (\"PlotNumber\" <> 9 AND \"AddedPlotCount\" = 0 AND \"ExpandedWidth\" IS NULL AND \"ExpandedHeight\" IS NULL)");
+                table.HasCheckConstraint(
+                    "CK_LandPurchaseCompletions_PremiumLedger_Consistent",
+                    "(\"PaymentCurrency\" = 'premiumCoins' AND \"PremiumCurrencyTransactionId\" IS NOT NULL) OR (\"PaymentCurrency\" = 'coins' AND \"PremiumCurrencyTransactionId\" IS NULL)");
+            });
+        });
+
+        modelBuilder.Entity<PremiumCurrencyTransaction>(entity =>
+        {
+            entity.Property(transaction => transaction.LedgerSequence)
+                .UseIdentityAlwaysColumn();
+            entity.Property(transaction => transaction.EventType)
+                .HasConversion(
+                    eventType => eventType.ToToken(),
+                    token => PremiumCurrencyEventTokens.Parse(token))
+                .HasMaxLength(60);
+            entity.Property(transaction => transaction.EventReference)
+                .HasMaxLength(PremiumCurrencyService.MaximumEventReferenceLength);
+            entity.Property(transaction => transaction.IdempotencyKey)
+                .HasMaxLength(PremiumCurrencyService.MaximumIdempotencyKeyLength);
+            entity.Property(transaction => transaction.OperationFingerprint)
+                .HasMaxLength(67);
+            entity.Property(transaction => transaction.ExternalSource)
+                .HasMaxLength(PremiumCurrencyService.MaximumExternalReferenceLength);
+            entity.Property(transaction => transaction.ExternalTransactionId)
+                .HasMaxLength(PremiumCurrencyService.MaximumExternalReferenceLength);
+            entity.Property(transaction => transaction.Metadata)
+                .HasColumnType("jsonb");
+
+            entity.HasIndex(transaction => transaction.LedgerSequence)
+                .IsUnique();
+            entity.HasIndex(transaction => new
+                {
+                    transaction.UserId,
+                    transaction.LedgerSequence
+                })
+                .IsDescending(false, true);
+            entity.HasIndex(transaction => new
+                {
+                    transaction.EventType,
+                    transaction.EventReference
+                });
+            entity.HasIndex(transaction => new
+                {
+                    transaction.UserId,
+                    transaction.IdempotencyKey
+                })
+                .IsUnique()
+                .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+            entity.HasIndex(transaction => new
+                {
+                    transaction.ExternalSource,
+                    transaction.ExternalTransactionId
+                })
+                .IsUnique()
+                .HasFilter("\"ExternalSource\" IS NOT NULL AND \"ExternalTransactionId\" IS NOT NULL");
+            entity.HasIndex(transaction => transaction.ReversesTransactionId)
+                .IsUnique()
+                .HasFilter("\"ReversesTransactionId\" IS NOT NULL");
+
+            entity.HasOne(transaction => transaction.User)
+                .WithMany()
+                .HasForeignKey(transaction => transaction.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(transaction => transaction.ReversesTransaction)
+                .WithMany()
+                .HasForeignKey(transaction => transaction.ReversesTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_PremiumCurrencyTransactions_Amount_NonZero",
+                    "\"Amount\" <> 0");
+                table.HasCheckConstraint(
+                    "CK_PremiumCurrencyTransactions_BalanceBefore_NonNegative",
+                    "\"BalanceBefore\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_PremiumCurrencyTransactions_BalanceAfter_NonNegative",
+                    "\"BalanceAfter\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_PremiumCurrencyTransactions_Balance_Consistent",
+                    "\"BalanceAfter\" = \"BalanceBefore\" + \"Amount\"");
+                table.HasCheckConstraint(
+                    "CK_PremiumCurrencyTransactions_ExternalReference_Complete",
+                    "(\"ExternalSource\" IS NULL AND \"ExternalTransactionId\" IS NULL) OR (\"ExternalSource\" IS NOT NULL AND \"ExternalTransactionId\" IS NOT NULL)");
+                table.HasCheckConstraint(
+                    "CK_PremiumCurrencyTransactions_IdempotencyReference_Present",
+                    "\"IdempotencyKey\" IS NOT NULL OR \"ExternalSource\" IS NOT NULL");
+            });
+        });
+
+        modelBuilder.Entity<PremiumCurrencyPurchaseItem>(entity =>
+        {
+            entity.Property(item => item.ItemIdSnapshot)
+                .HasMaxLength(PremiumCurrencyService.MaximumItemIdentifierLength);
+            entity.Property(item => item.ItemNameSnapshot)
+                .HasMaxLength(PremiumCurrencyService.MaximumItemNameLength);
+
+            entity.HasIndex(item => item.PremiumCurrencyTransactionId);
+            entity.HasOne(item => item.PremiumCurrencyTransaction)
+                .WithMany(transaction => transaction.PurchaseItems)
+                .HasForeignKey(item => item.PremiumCurrencyTransactionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_PremiumCurrencyPurchaseItems_Quantity_Positive",
+                    "\"Quantity\" > 0");
+                table.HasCheckConstraint(
+                    "CK_PremiumCurrencyPurchaseItems_UnitPrice_Positive",
+                    "\"UnitPremiumPrice\" > 0");
             });
         });
 
@@ -436,6 +586,9 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Inventory>(entity =>
         {
+            entity.HasIndex(inventory => inventory.UserId)
+                .IsUnique();
+
             entity.ToTable(table =>
             {
                 table.HasCheckConstraint(
@@ -462,5 +615,23 @@ public class AppDbContext : DbContext
             .HasForeignKey(t => t.PlotId)
             .OnDelete(DeleteBehavior.Cascade);
 
+    }
+
+    private void EnsurePremiumLedgerIsImmutable()
+    {
+        var mutableTransaction = ChangeTracker
+            .Entries<PremiumCurrencyTransaction>()
+            .FirstOrDefault(entry => entry.State is EntityState.Modified
+                or EntityState.Deleted);
+        var mutableItem = ChangeTracker
+            .Entries<PremiumCurrencyPurchaseItem>()
+            .FirstOrDefault(entry => entry.State is EntityState.Modified
+                or EntityState.Deleted);
+
+        if (mutableTransaction != null || mutableItem != null)
+        {
+            throw new InvalidOperationException(
+                "Premium currency ledger records are immutable at the application level.");
+        }
     }
 }

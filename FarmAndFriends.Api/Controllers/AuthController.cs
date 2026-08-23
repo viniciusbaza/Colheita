@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
 using FarmAndFriends.Api.Domain.Enums;
 using FarmAndFriends.Api.Domain.Rules;
+using FarmAndFriends.Api.Domain.Services;
 
 namespace FarmAndFriends.Api.Controllers;
 
@@ -16,11 +17,16 @@ public class AuthController : ControllerBase
 {
     private readonly AppDbContext _context;
     private readonly TokenService _tokenService;
+    private readonly PremiumCurrencyService _premiumCurrencyService;
 
-    public AuthController(AppDbContext context, TokenService tokenService)
+    public AuthController(
+        AppDbContext context,
+        TokenService tokenService,
+        PremiumCurrencyService premiumCurrencyService)
     {
         _context = context;
         _tokenService = tokenService;
+        _premiumCurrencyService = premiumCurrencyService;
     }
 
     public record LoginRequest(string Username, string Password);
@@ -141,7 +147,7 @@ public class AuthController : ControllerBase
             Id = Guid.NewGuid(),
             UserId = user.Id,
             Coins = 100,
-            PremiumCoins = 10
+            PremiumCoins = 0
         };
 
         var starterItems = new List<InventoryItem>
@@ -177,7 +183,28 @@ public class AuthController : ControllerBase
         _context.Inventories.Add(inventory);
         _context.InventoryItems.AddRange(starterItems);
 
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
         await _context.SaveChangesAsync();
+
+        var lockedUser = await _context.LockAsync(user.Id);
+        if (lockedUser == null)
+            throw new InvalidOperationException("Newly registered user was not persisted.");
+
+        var grant = await _premiumCurrencyService.CreditAsync(
+            user.Id,
+            10,
+            PremiumCurrencyEventType.AccountInitialGrant,
+            user.Id.ToString("D").ToLowerInvariant(),
+            $"account-initial-grant:{user.Id:D}".ToLowerInvariant());
+        if (!grant.Succeeded
+            || grant.Disposition != PremiumCurrencyOperationDisposition.Applied)
+        {
+            throw new InvalidOperationException(
+                "The initial premium currency grant could not be applied.");
+        }
+
+        await transaction.CommitAsync();
 
         return Created("", new
         {

@@ -17,4 +17,5 @@ public static class LandErrorCodes
     public const string InvalidPaymentCurrency =
         "LAND_INVALID_PAYMENT_CURRENCY";
     public const string InventoryNotFound = "LAND_INVENTORY_NOT_FOUND";
+    public const string EconomyInconsistent = "LAND_ECONOMY_INCONSISTENT";
 }

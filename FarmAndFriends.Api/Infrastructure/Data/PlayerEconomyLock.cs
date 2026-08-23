@@ -5,6 +5,10 @@ namespace FarmAndFriends.Api.Infrastructure.Data;
 
 public static class PlayerEconomyLock
 {
+    // Global acquisition order for mutable gameplay state:
+    // User -> canonical Friendship -> Farm -> ordered Plots -> Inventory ->
+    // ordered InventoryItems -> completion/ledger rows. A caller must not
+    // acquire an earlier lock after a later one.
     public static async Task<User?> LockAsync(
         this AppDbContext context,
         Guid userId,
@@ -61,6 +65,23 @@ public static class PlayerEconomyLock
                 FOR UPDATE
                 """)
             .ToListAsync(cancellationToken);
+    }
+
+    public static async Task<Inventory?> LockInventoryAsync(
+        this AppDbContext context,
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureTransaction(context);
+
+        return await context.Inventories
+            .FromSqlInterpolated(
+                $"""
+                SELECT * FROM "Inventories"
+                WHERE "UserId" = {userId}
+                FOR UPDATE
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
     private static void EnsureTransaction(AppDbContext context)

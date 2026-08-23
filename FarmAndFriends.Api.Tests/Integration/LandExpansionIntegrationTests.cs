@@ -1,9 +1,18 @@
+using System.Data.Common;
+using System.Security.Claims;
 using FarmAndFriends.Api.Configuration;
+using FarmAndFriends.Api.Contracts.Land;
+using FarmAndFriends.Api.Controllers;
 using FarmAndFriends.Api.Domain.Entities;
+using FarmAndFriends.Api.Domain.Enums;
 using FarmAndFriends.Api.Domain.Rules;
 using FarmAndFriends.Api.Domain.Services;
 using FarmAndFriends.Api.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -65,6 +74,21 @@ public sealed class LandExpansionIntegrationTests
             (coinInventory.Coins, coinInventory.PremiumCoins));
         Assert.Equal((1_000, 8),
             (premiumInventory.Coins, premiumInventory.PremiumCoins));
+        var premiumCompletion = await assertContext.LandPurchaseCompletions
+            .SingleAsync(completion =>
+                completion.FarmId == premiumFarm.FarmId);
+        Assert.NotNull(premiumCompletion.PremiumCurrencyTransactionId);
+        Assert.True(await assertContext.PremiumCurrencyTransactions.AnyAsync(
+            transaction =>
+                transaction.Id
+                    == premiumCompletion.PremiumCurrencyTransactionId
+                && transaction.Amount == -2
+                && transaction.EventType
+                    == PremiumCurrencyEventType.LandPurchase));
+        Assert.False(await assertContext.LandPurchaseCompletions
+            .Where(completion => completion.FarmId == coinFarm.FarmId)
+            .AnyAsync(completion =>
+                completion.PremiumCurrencyTransactionId != null));
         Assert.True(await assertContext.Plots
             .Where(plot =>
                 plot.Id == coinFarm.OfferedPlotId
@@ -394,6 +418,227 @@ public sealed class LandExpansionIntegrationTests
 
     [PostgresFact]
     [Trait("Category", "Postgres")]
+    public async Task PremiumRetry_ReplaysWithoutAnotherDebitUnlockOrCompletion()
+    {
+        var arranged = await ArrangeAsync(2, 6, 1_000, 10);
+        var key = Guid.NewGuid();
+
+        LandPurchaseAttempt original;
+        await using (var context = new AppDbContext(DatabaseOptions()))
+        {
+            original = await Service(context).PurchaseAsync(
+                arranged.UserId,
+                arranged.OfferedPlotId,
+                LandPaymentCurrency.PremiumCoins,
+                key);
+        }
+
+        LandPurchaseAttempt replay;
+        await using (var context = new AppDbContext(DatabaseOptions()))
+        {
+            replay = await Service(context).PurchaseAsync(
+                arranged.UserId,
+                arranged.OfferedPlotId,
+                LandPaymentCurrency.PremiumCoins,
+                key);
+        }
+
+        Assert.True(original.Succeeded);
+        Assert.False(original.Response!.Replayed);
+        Assert.True(replay.Succeeded);
+        Assert.True(replay.Response!.Replayed);
+        Assert.Equal(original.Response.CompletionId,
+            replay.Response.CompletionId);
+        await AssertSinglePremiumPurchaseAsync(arranged, expectedBalance: 8);
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task ConcurrentPremiumRetry_HasOneDebitCompletionAndUnlock()
+    {
+        var arranged = await ArrangeAsync(2, 6, 1_000, 10);
+        var key = Guid.NewGuid();
+        await using var firstContext = new AppDbContext(DatabaseOptions());
+        await using var secondContext = new AppDbContext(DatabaseOptions());
+        var gate = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var first = PurchaseAfterGate(
+            gate.Task,
+            Service(firstContext),
+            arranged,
+            key,
+            LandPaymentCurrency.PremiumCoins);
+        var second = PurchaseAfterGate(
+            gate.Task,
+            Service(secondContext),
+            arranged,
+            key,
+            LandPaymentCurrency.PremiumCoins);
+        gate.SetResult();
+        var attempts = await Task.WhenAll(first, second)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.All(attempts, attempt => Assert.True(attempt.Succeeded));
+        Assert.Single(attempts, attempt => !attempt.Response!.Replayed);
+        Assert.Single(attempts, attempt => attempt.Response!.Replayed);
+        await AssertSinglePremiumPurchaseAsync(arranged, expectedBalance: 8);
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task PremiumCompletionFailureAfterDebit_RollsBackEverything()
+    {
+        var arranged = await ArrangeAsync(2, 6, 1_000, 10);
+        var options = DatabaseOptions(new FailCommandInterceptor(
+            "INSERT INTO \"LandPurchaseCompletions\""));
+
+        await using (var context = new AppDbContext(options))
+        {
+            await Assert.ThrowsAsync<DbUpdateException>(() =>
+                Service(context).PurchaseAsync(
+                    arranged.UserId,
+                    arranged.OfferedPlotId,
+                    LandPaymentCurrency.PremiumCoins,
+                    Guid.NewGuid()));
+        }
+
+        await using var assertContext = new AppDbContext(DatabaseOptions());
+        Assert.Equal(10, await assertContext.Inventories
+            .Where(inventory => inventory.UserId == arranged.UserId)
+            .Select(inventory => inventory.PremiumCoins)
+            .SingleAsync());
+        Assert.False((await assertContext.Plots.FindAsync(
+            arranged.OfferedPlotId))!.Unlocked);
+        Assert.False(await assertContext.LandPurchaseCompletions.AnyAsync(
+            completion => completion.FarmId == arranged.FarmId));
+        Assert.Equal(0, await assertContext.PremiumCurrencyTransactions
+            .CountAsync(transaction =>
+                transaction.UserId == arranged.UserId
+                && transaction.EventType
+                    == PremiumCurrencyEventType.LandPurchase));
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task CanonicalLockOrder_MixedLandAndWalletFlowDoesNotDeadlock()
+    {
+        var arranged = await ArrangeAsync(2, 6, 1_000, 10);
+        await using var landContext = new AppDbContext(DatabaseOptions());
+        await using var walletContext = new AppDbContext(DatabaseOptions());
+        var gate = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var landTask = PurchaseAfterGate(
+            gate.Task,
+            Service(landContext),
+            arranged,
+            paymentCurrency: LandPaymentCurrency.PremiumCoins);
+        var walletTask = CreditAfterGate(
+            gate.Task,
+            walletContext,
+            arranged.UserId);
+        gate.SetResult();
+        await Task.WhenAll(landTask, walletTask)
+            .WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(landTask.Result.Succeeded);
+        Assert.Equal(PremiumCurrencyOperationDisposition.Applied,
+            walletTask.Result.Disposition);
+        await AssertSinglePremiumPurchaseAsync(arranged, expectedBalance: 9);
+        await using var assertContext = new AppDbContext(DatabaseOptions());
+        var reconciliation = await new PremiumCurrencyReconciliationService(
+                assertContext)
+            .ReconcileAsync(arranged.UserId);
+        Assert.True(reconciliation.IsConsistent);
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task EconomyInconsistent_IsLoggedAndReturnedAsServiceUnavailable()
+    {
+        var arranged = await ArrangeAsync(2, 6, 1_000, 10);
+        var key = Guid.NewGuid();
+        Guid unrelatedTransactionId;
+        await using (var context = new AppDbContext(DatabaseOptions()))
+        {
+            unrelatedTransactionId = await context.PremiumCurrencyTransactions
+                .Where(transaction =>
+                    transaction.UserId == arranged.UserId
+                    && transaction.EventType
+                        == PremiumCurrencyEventType.AdminGrant)
+                .Select(transaction => transaction.Id)
+                .SingleAsync();
+            context.LandPurchaseCompletions.Add(new LandPurchaseCompletion
+            {
+                Id = Guid.NewGuid(),
+                IdempotencyKey = key,
+                BuyerUserId = arranged.UserId,
+                FarmId = arranged.FarmId,
+                PlotId = arranged.OfferedPlotId,
+                PremiumCurrencyTransactionId = unrelatedTransactionId,
+                PlotNumber = 7,
+                PaymentCurrency = LandExpansionService.PremiumCoinsCurrency,
+                AmountSpent = 2,
+                CoinsAfter = 1_000,
+                PremiumCoinsAfter = 8,
+                AddedPlotCount = 0,
+                PurchasedAt = DateTime.UtcNow
+            });
+            await context.SaveChangesAsync();
+        }
+
+        var logger = new CapturingLandLogger();
+        await using (var context = new AppDbContext(DatabaseOptions()))
+        {
+            var controller = new LandPurchaseController(
+                Service(context, logger: logger))
+            {
+                ControllerContext = new ControllerContext
+                {
+                    HttpContext = new DefaultHttpContext
+                    {
+                        User = new ClaimsPrincipal(new ClaimsIdentity(
+                            [new Claim(
+                                ClaimTypes.NameIdentifier,
+                                arranged.UserId.ToString())],
+                            "test"))
+                    }
+                }
+            };
+            var response = await controller.Purchase(
+                arranged.OfferedPlotId,
+                new PurchaseLandRequest(
+                    LandExpansionService.PremiumCoinsCurrency),
+                key.ToString("D"),
+                CancellationToken.None);
+            var unavailable = Assert.IsType<ObjectResult>(response);
+            Assert.Equal(StatusCodes.Status503ServiceUnavailable,
+                unavailable.StatusCode);
+            var problem = Assert.IsType<ProblemDetails>(unavailable.Value);
+            Assert.Equal(LandErrorCodes.EconomyInconsistent,
+                problem.Extensions["code"]);
+        }
+
+        Assert.Equal(LogLevel.Error, logger.Level);
+        Assert.Equal("completion_ledger_replay_mismatch",
+            logger.Values["Reason"]);
+        Assert.Equal(arranged.UserId, logger.Values["BuyerUserId"]);
+        Assert.Equal(arranged.OfferedPlotId, logger.Values["PlotId"]);
+        Assert.Equal(unrelatedTransactionId,
+            logger.Values["PremiumCurrencyTransactionId"]);
+
+        await using var assertContext = new AppDbContext(DatabaseOptions());
+        Assert.Equal(10, await assertContext.Inventories
+            .Where(inventory => inventory.UserId == arranged.UserId)
+            .Select(inventory => inventory.PremiumCoins)
+            .SingleAsync());
+        Assert.Equal(1, await assertContext.PremiumCurrencyTransactions
+            .CountAsync(transaction => transaction.UserId == arranged.UserId));
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
     public async Task DatabaseConstraints_RejectDuplicateCoordinatesAndNegativeValues()
     {
         var arranged = await ArrangeAsync(2, 6, 1_000, 10);
@@ -538,14 +783,59 @@ public sealed class LandExpansionIntegrationTests
         Task gate,
         LandExpansionService service,
         ArrangedFarm arranged,
-        Guid? idempotencyKey = null)
+        Guid? idempotencyKey = null,
+        LandPaymentCurrency paymentCurrency = LandPaymentCurrency.Coins)
     {
         await gate;
         return await service.PurchaseAsync(
             arranged.UserId,
             arranged.OfferedPlotId,
-            LandPaymentCurrency.Coins,
+            paymentCurrency,
             idempotencyKey ?? Guid.NewGuid());
+    }
+
+    private static async Task<PremiumCurrencyOperationResult> CreditAfterGate(
+        Task gate,
+        AppDbContext context,
+        Guid userId)
+    {
+        await gate;
+        await using var transaction =
+            await context.Database.BeginTransactionAsync();
+        Assert.NotNull(await context.LockAsync(userId));
+        var result = await new PremiumCurrencyService(
+                context,
+                TimeProvider.System)
+            .CreditAsync(
+                userId,
+                1,
+                PremiumCurrencyEventType.AdminGrant,
+                $"lock-order-grant:{Guid.NewGuid():D}",
+                $"admin-grant:{Guid.NewGuid():D}");
+        if (result.Succeeded)
+            await transaction.CommitAsync();
+        return result;
+    }
+
+    private static async Task AssertSinglePremiumPurchaseAsync(
+        ArrangedFarm arranged,
+        int expectedBalance)
+    {
+        await using var context = new AppDbContext(DatabaseOptions());
+        Assert.Equal(expectedBalance, await context.Inventories
+            .Where(inventory => inventory.UserId == arranged.UserId)
+            .Select(inventory => inventory.PremiumCoins)
+            .SingleAsync());
+        var completion = await context.LandPurchaseCompletions
+            .SingleAsync(candidate => candidate.FarmId == arranged.FarmId);
+        Assert.NotNull(completion.PremiumCurrencyTransactionId);
+        Assert.Equal(1, await context.PremiumCurrencyTransactions
+            .CountAsync(transaction =>
+                transaction.UserId == arranged.UserId
+                && transaction.EventType
+                    == PremiumCurrencyEventType.LandPurchase));
+        Assert.True((await context.Plots.FindAsync(
+            arranged.OfferedPlotId))!.Unlocked);
     }
 
     private static LandPurchaseCompletion Completion(
@@ -585,6 +875,8 @@ public sealed class LandExpansionIntegrationTests
         Assert.Equal(FarmLayoutStatus.OfferAvailable, evaluation.Status);
 
         await using var context = new AppDbContext(DatabaseOptions());
+        await using var transaction =
+            await context.Database.BeginTransactionAsync();
         context.Users.Add(new User
         {
             Id = userId,
@@ -605,9 +897,27 @@ public sealed class LandExpansionIntegrationTests
             Id = Guid.NewGuid(),
             UserId = userId,
             Coins = coins,
-            PremiumCoins = premiumCoins
+            PremiumCoins = 0
         });
         await context.SaveChangesAsync();
+
+        Assert.NotNull(await context.LockAsync(userId));
+        if (premiumCoins > 0)
+        {
+            var grant = await new PremiumCurrencyService(
+                    context,
+                    TimeProvider.System)
+                .CreditAsync(
+                    userId,
+                    premiumCoins,
+                    PremiumCurrencyEventType.AdminGrant,
+                    $"land-test-grant:{userId:D}",
+                    $"admin-grant:{userId:D}");
+            Assert.Equal(PremiumCurrencyOperationDisposition.Applied,
+                grant.Disposition);
+        }
+
+        await transaction.CommitAsync();
 
         return new ArrangedFarm(
             userId,
@@ -648,18 +958,70 @@ public sealed class LandExpansionIntegrationTests
 
     private static LandExpansionService Service(
         AppDbContext context,
-        bool enabled = true) =>
+        bool enabled = true,
+        ILogger<LandExpansionService>? logger = null) =>
         new(
             context,
             Options.Create(new LandExpansionOptions { Enabled = enabled }),
             TimeProvider.System,
-            NullLogger<LandExpansionService>.Instance);
+            logger ?? NullLogger<LandExpansionService>.Instance,
+            new PremiumCurrencyService(context, TimeProvider.System));
 
-    private static DbContextOptions<AppDbContext> DatabaseOptions() =>
-        new DbContextOptionsBuilder<AppDbContext>()
+    private static DbContextOptions<AppDbContext> DatabaseOptions(
+        params IInterceptor[] interceptors)
+    {
+        var builder = new DbContextOptionsBuilder<AppDbContext>()
             .UseNpgsql(Environment.GetEnvironmentVariable(
-                "CROP_CARE_TEST_CONNECTION")!)
-            .Options;
+                "CROP_CARE_TEST_CONNECTION")!);
+        if (interceptors.Length != 0)
+            builder.AddInterceptors(interceptors);
+        return builder.Options;
+    }
+
+    private sealed class FailCommandInterceptor(string commandFragment)
+        : DbCommandInterceptor
+    {
+        public override ValueTask<InterceptionResult<DbDataReader>>
+            ReaderExecutingAsync(
+                DbCommand command,
+                CommandEventData eventData,
+                InterceptionResult<DbDataReader> result,
+                CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains(commandFragment,
+                StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Injected land completion persistence failure.");
+            }
+
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class CapturingLandLogger : ILogger<LandExpansionService>
+    {
+        public LogLevel? Level { get; private set; }
+        public IReadOnlyDictionary<string, object?> Values { get; private set; } =
+            new Dictionary<string, object?>();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Level = logLevel;
+            Values = ((IEnumerable<KeyValuePair<string, object?>>)(object)state!)
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+        }
+    }
 
     private sealed record ArrangedFarm(
         Guid UserId,

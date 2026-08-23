@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FarmAndFriends.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260816155338_InitialCreate")]
+    [Migration("20260818050938_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -171,7 +171,8 @@ namespace FarmAndFriends.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId")
+                        .IsUnique();
 
                     b.ToTable("Inventories", t =>
                         {
@@ -250,12 +251,18 @@ namespace FarmAndFriends.Api.Migrations
                     b.Property<int>("PremiumCoinsAfter")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("PremiumCurrencyTransactionId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("PurchasedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
                     b.HasIndex("PlotId")
+                        .IsUnique();
+
+                    b.HasIndex("PremiumCurrencyTransactionId")
                         .IsUnique();
 
                     b.HasIndex("BuyerUserId", "IdempotencyKey")
@@ -281,6 +288,8 @@ namespace FarmAndFriends.Api.Migrations
                             t.HasCheckConstraint("CK_LandPurchaseCompletions_PlotNumber_Range", "\"PlotNumber\" >= 7 AND \"PlotNumber\" <= 28");
 
                             t.HasCheckConstraint("CK_LandPurchaseCompletions_PremiumCoinsAfter_NonNegative", "\"PremiumCoinsAfter\" >= 0");
+
+                            t.HasCheckConstraint("CK_LandPurchaseCompletions_PremiumLedger_Consistent", "(\"PaymentCurrency\" = 'premiumCoins' AND \"PremiumCurrencyTransactionId\" IS NOT NULL) OR (\"PaymentCurrency\" = 'coins' AND \"PremiumCurrencyTransactionId\" IS NULL)");
                         });
                 });
 
@@ -488,6 +497,141 @@ namespace FarmAndFriends.Api.Migrations
                             t.HasCheckConstraint("CK_Plots_PestConsumedAmount_NonNegative", "\"PestConsumedAmount\" >= 0");
 
                             t.HasCheckConstraint("CK_Plots_RemainingYield_Positive", "\"RemainingYield\" IS NULL OR \"RemainingYield\" >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.PremiumCurrencyPurchaseItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ItemIdSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ItemNameSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("PremiumCurrencyTransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UnitPremiumPrice")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PremiumCurrencyTransactionId");
+
+                    b.ToTable("PremiumCurrencyPurchaseItems", t =>
+                        {
+                            t.HasCheckConstraint("CK_PremiumCurrencyPurchaseItems_Quantity_Positive", "\"Quantity\" > 0");
+
+                            t.HasCheckConstraint("CK_PremiumCurrencyPurchaseItems_UnitPrice_Positive", "\"UnitPremiumPrice\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.PremiumCurrencyTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Amount")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("BalanceAfter")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("BalanceBefore")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventReference")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("ExternalSource")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ExternalTransactionId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<long>("LedgerSequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityAlwaysColumn(b.Property<long>("LedgerSequence"));
+
+                    b.Property<string>("Metadata")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("OperationFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(67)
+                        .HasColumnType("character varying(67)");
+
+                    b.Property<Guid?>("ReversesTransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LedgerSequence")
+                        .IsUnique();
+
+                    b.HasIndex("ReversesTransactionId")
+                        .IsUnique()
+                        .HasFilter("\"ReversesTransactionId\" IS NOT NULL");
+
+                    b.HasIndex("EventType", "EventReference");
+
+                    b.HasIndex("ExternalSource", "ExternalTransactionId")
+                        .IsUnique()
+                        .HasFilter("\"ExternalSource\" IS NOT NULL AND \"ExternalTransactionId\" IS NOT NULL");
+
+                    b.HasIndex("UserId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
+                    b.HasIndex("UserId", "LedgerSequence")
+                        .IsDescending(false, true);
+
+                    b.ToTable("PremiumCurrencyTransactions", t =>
+                        {
+                            t.HasCheckConstraint("CK_PremiumCurrencyTransactions_Amount_NonZero", "\"Amount\" <> 0");
+
+                            t.HasCheckConstraint("CK_PremiumCurrencyTransactions_BalanceAfter_NonNegative", "\"BalanceAfter\" >= 0");
+
+                            t.HasCheckConstraint("CK_PremiumCurrencyTransactions_BalanceBefore_NonNegative", "\"BalanceBefore\" >= 0");
+
+                            t.HasCheckConstraint("CK_PremiumCurrencyTransactions_Balance_Consistent", "\"BalanceAfter\" = \"BalanceBefore\" + \"Amount\"");
+
+                            t.HasCheckConstraint("CK_PremiumCurrencyTransactions_ExternalReference_Complete", "(\"ExternalSource\" IS NULL AND \"ExternalTransactionId\" IS NULL) OR (\"ExternalSource\" IS NOT NULL AND \"ExternalTransactionId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_PremiumCurrencyTransactions_IdempotencyReference_Present", "\"IdempotencyKey\" IS NOT NULL OR \"ExternalSource\" IS NOT NULL");
                         });
                 });
 
@@ -833,6 +977,11 @@ namespace FarmAndFriends.Api.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.PremiumCurrencyTransaction", "PremiumCurrencyTransaction")
+                        .WithMany()
+                        .HasForeignKey("PremiumCurrencyTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("FarmAndFriends.Api.Domain.Entities.Farm", "Farm")
                         .WithMany()
                         .HasForeignKey("FarmId", "BuyerUserId")
@@ -852,6 +1001,8 @@ namespace FarmAndFriends.Api.Migrations
                     b.Navigation("Farm");
 
                     b.Navigation("Plot");
+
+                    b.Navigation("PremiumCurrencyTransaction");
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Notification", b =>
@@ -914,6 +1065,35 @@ namespace FarmAndFriends.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Farm");
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.PremiumCurrencyPurchaseItem", b =>
+                {
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.PremiumCurrencyTransaction", "PremiumCurrencyTransaction")
+                        .WithMany("PurchaseItems")
+                        .HasForeignKey("PremiumCurrencyTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("PremiumCurrencyTransaction");
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.PremiumCurrencyTransaction", b =>
+                {
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.PremiumCurrencyTransaction", "ReversesTransaction")
+                        .WithMany()
+                        .HasForeignKey("ReversesTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("FarmAndFriends.Api.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ReversesTransaction");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.RefreshToken", b =>
@@ -997,6 +1177,11 @@ namespace FarmAndFriends.Api.Migrations
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.Inventory", b =>
                 {
                     b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.PremiumCurrencyTransaction", b =>
+                {
+                    b.Navigation("PurchaseItems");
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.User", b =>

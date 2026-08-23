@@ -140,7 +140,8 @@ public sealed class LandExpansionContractTests
             context,
             Options.Create(new LandExpansionOptions { Enabled = enabled }),
             TimeProvider.System,
-            NullLogger<LandExpansionService>.Instance);
+            NullLogger<LandExpansionService>.Instance,
+            new PremiumCurrencyService(context, TimeProvider.System));
 
     private static AppDbContext CreateContext() =>
         new(new DbContextOptionsBuilder<AppDbContext>()

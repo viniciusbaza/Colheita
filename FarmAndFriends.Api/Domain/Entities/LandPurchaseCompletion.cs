@@ -14,6 +14,9 @@ public sealed class LandPurchaseCompletion
     public Guid PlotId { get; set; }
     public Plot Plot { get; set; } = null!;
 
+    public Guid? PremiumCurrencyTransactionId { get; set; }
+    public PremiumCurrencyTransaction? PremiumCurrencyTransaction { get; set; }
+
     public int PlotNumber { get; set; }
     public string PaymentCurrency { get; set; } = null!;
     public int AmountSpent { get; set; }
