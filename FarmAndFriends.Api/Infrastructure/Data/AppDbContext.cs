@@ -502,6 +502,12 @@ public class AppDbContext : DbContext
             entity.ToTable(table =>
             {
                 table.HasCheckConstraint(
+                    "CK_Plots_CurrentHarvestCycle_Consistent",
+                    "(\"SeedId\" IS NULL AND \"CurrentHarvestCycle\" IS NULL) OR (\"SeedId\" IS NOT NULL AND \"CurrentHarvestCycle\" IS NOT NULL AND \"CurrentHarvestCycle\" >= 1)");
+                table.HasCheckConstraint(
+                    "CK_Plots_CurrentHarvestCycleStartedAt_Consistent",
+                    "(\"SeedId\" IS NULL AND \"PlantedAt\" IS NULL AND \"ReadyAt\" IS NULL AND \"RemainingYield\" IS NULL AND \"CurrentHarvestCycleStartedAt\" IS NULL) OR (\"SeedId\" IS NOT NULL AND \"PlantedAt\" IS NOT NULL AND \"ReadyAt\" IS NOT NULL AND \"RemainingYield\" IS NOT NULL AND \"CurrentHarvestCycleStartedAt\" IS NOT NULL AND \"ReadyAt\" > \"CurrentHarvestCycleStartedAt\")");
+                table.HasCheckConstraint(
                     "CK_Plots_RemainingYield_Positive",
                     "\"RemainingYield\" IS NULL OR \"RemainingYield\" >= 1");
                 table.HasCheckConstraint(
@@ -513,18 +519,59 @@ public class AppDbContext : DbContext
             });
         });
 
-        modelBuilder.Entity<Seed>()
-            .Property(s => s.GrowTime)
-            .HasConversion(
-                v => v.TotalSeconds,
-                v => TimeSpan.FromSeconds(v)
-            );
+        modelBuilder.Entity<InventoryItem>(entity =>
+        {
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_InventoryItems_Quantity_NonNegative",
+                    "\"Quantity\" >= 0");
+            });
+        });
+
+        modelBuilder.Entity<Seed>(entity =>
+        {
+            entity.Property(seed => seed.GrowTime)
+                .HasConversion(
+                    value => value.TotalSeconds,
+                    value => TimeSpan.FromSeconds(value));
+            entity.Property(seed => seed.RegrowTime)
+                .HasConversion(
+                    value => value.HasValue
+                        ? value.Value.TotalSeconds
+                        : (double?)null,
+                    value => value.HasValue
+                        ? TimeSpan.FromSeconds(value.Value)
+                        : (TimeSpan?)null);
+            entity.Property(seed => seed.HarvestCycles)
+                .HasDefaultValue(1);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_Seeds_RequiredText_NotBlank",
+                    "length(btrim(\"Id\")) > 0 AND length(btrim(\"Name\")) > 0 AND length(btrim(\"CropId\")) > 0 AND length(btrim(\"CropName\")) > 0");
+                table.HasCheckConstraint(
+                    "CK_Seeds_GrowTime_Positive",
+                    "\"GrowTime\" > 0");
+                table.HasCheckConstraint(
+                    "CK_Seeds_CropAmount_Positive",
+                    "\"CropAmount\" >= 1");
+                table.HasCheckConstraint(
+                    "CK_Seeds_HarvestCycles_Positive",
+                    "\"HarvestCycles\" >= 1");
+                table.HasCheckConstraint(
+                    "CK_Seeds_RegrowTime_Consistent",
+                    "(\"HarvestCycles\" = 1 AND \"RegrowTime\" IS NULL) OR (\"HarvestCycles\" > 1 AND \"RegrowTime\" > 0)");
+            });
+        });
 
         modelBuilder.Entity<Seed>().HasData(
             new Seed
             {
                 Id = "carrot",
                 Name = "Cenoura",
+                CropName = "Cenoura",
                 BuyPrice = 10,
                 SellPrice = 20,
                 Icon = "🥕",
@@ -532,12 +579,14 @@ public class AppDbContext : DbContext
                 TheftChancePercent = 100,
                 MinLevel = 1,   
                 CropId = "carrot_crop",
-                CropAmount = 1
+                CropAmount = 1,
+                HarvestCycles = 1
             },
             new Seed
             {
                 Id = "corn",
                 Name = "Milho",
+                CropName = "Milho",
                 Icon = "🌽",
                 BuyPrice = 20,
                 SellPrice = 45,
@@ -545,12 +594,14 @@ public class AppDbContext : DbContext
                 TheftChancePercent = 100,
                 MinLevel = 2,
                 CropId = "corn_crop",
-                CropAmount = 3  
+                CropAmount = 3,
+                HarvestCycles = 1
             },
             new Seed
             {
                 Id = "tomato",
                 Name = "Tomate",
+                CropName = "Tomate",
                 Icon = "🍅",
                 BuyPrice = 30,
                 SellPrice = 60,
@@ -558,12 +609,15 @@ public class AppDbContext : DbContext
                 TheftChancePercent = 100,
                 MinLevel = 3,
                 CropId = "tomato_crop",
-                CropAmount = 4
+                CropAmount = 4,
+                HarvestCycles = 2,
+                RegrowTime = TimeSpan.FromMinutes(2)
             },
             new Seed
             {
                 Id = "pumpkin",
                 Name = "Abóbora",
+                CropName = "Abóbora",
                 Icon = "🎃",
                 BuyPrice = 40,
                 SellPrice = 80,
@@ -571,7 +625,24 @@ public class AppDbContext : DbContext
                 TheftChancePercent = 100,
                 MinLevel = 4,
                 CropId = "pumpkin_crop",
-                CropAmount = 5
+                CropAmount = 5,
+                HarvestCycles = 1
+            },
+            new Seed
+            {
+                Id = "apple_tree",
+                Name = "Macieira",
+                CropName = "Maçã",
+                Icon = "🍎",
+                BuyPrice = 90,
+                SellPrice = 30,
+                GrowTime = TimeSpan.FromHours(2),
+                RegrowTime = TimeSpan.FromHours(1),
+                TheftChancePercent = 100,
+                MinLevel = 5,
+                CropId = "apple_crop",
+                CropAmount = 3,
+                HarvestCycles = 3
             }
         );
 

@@ -16,6 +16,8 @@ public class Plot
     public string? SeedId { get; set; }
 
     public DateTime? PlantedAt { get; set; }
+    public int? CurrentHarvestCycle { get; set; }
+    public DateTime? CurrentHarvestCycleStartedAt { get; set; }
     public DateTime? ReadyAt { get; set; }
     public bool IsEmpty => SeedId == null;
     public bool IsReady => ReadyAt <= DateTime.UtcNow;

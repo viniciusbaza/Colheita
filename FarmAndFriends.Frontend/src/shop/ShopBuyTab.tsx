@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Seed } from '../types/Farm'
 import type { ShopItem } from '../types/Shop'
+import { formatTimeSpanDuration } from '../utils/time'
 import { MAX_SHOP_QUANTITY } from './shopLimits'
 import { useShop } from './useShop'
 
@@ -381,8 +382,46 @@ export function ShopBuyTab({
                 <p className="mt-1 text-sm font-semibold text-amber-700">
                   🪙 {numberFormatter.format(seed.buyPrice)} por semente
                 </p>
+                {seed.harvestCycles > 1 && (
+                  <span className="mt-2 inline-flex rounded-full bg-lime-100 px-2 py-1 text-xs font-bold text-lime-800">
+                    Colheita contínua
+                  </span>
+                )}
               </div>
             </div>
+
+            <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-emerald-50 px-3 py-2 text-xs">
+              <div>
+                <dt className="text-emerald-600">Produção por ciclo</dt>
+                <dd className="font-semibold text-emerald-900">
+                  {numberFormatter.format(seed.cropAmount)} {seed.cropName}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-emerald-600">Crescimento inicial</dt>
+                <dd className="font-semibold text-emerald-900">
+                  {formatTimeSpanDuration(seed.growTime)}
+                </dd>
+              </div>
+              {seed.harvestCycles > 1 && (
+                <>
+                  <div>
+                    <dt className="text-emerald-600">Colheitas</dt>
+                    <dd className="font-semibold text-emerald-900">
+                      {numberFormatter.format(seed.harvestCycles)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-emerald-600">Novo ciclo</dt>
+                    <dd className="font-semibold text-emerald-900">
+                      {seed.regrowTime
+                        ? formatTimeSpanDuration(seed.regrowTime)
+                        : '—'}
+                    </dd>
+                  </div>
+                </>
+              )}
+            </dl>
 
             <div className="mt-4 flex items-end gap-2">
               <label className="min-w-0 flex-1 text-xs font-semibold text-emerald-700">

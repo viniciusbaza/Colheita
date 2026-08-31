@@ -54,6 +54,9 @@ public sealed class PostgresFactAttribute : FactAttribute
 
 public sealed class CropCareConcurrencyTests
 {
+    private static int ConfiguredXpReward =>
+        new CropCareOptions().XpReward;
+
     [PostgresFact]
     [Trait("Category", "Postgres")]
     public async Task Care_LockedPlotWithGrowingState_GrantsNothing()
@@ -228,7 +231,9 @@ public sealed class CropCareConcurrencyTests
             attempt =>
             {
                 Assert.Equal(2, attempt.Response!.CoinsGained);
-                Assert.Equal(2, attempt.Response.XpGained);
+                Assert.Equal(
+                    ConfiguredXpReward,
+                    attempt.Response.XpGained);
                 Assert.True(attempt.Response.CycleRewardGranted);
             });
 
@@ -396,7 +401,9 @@ public sealed class CropCareConcurrencyTests
         Assert.All(attempts, attempt =>
         {
             Assert.Equal(2, attempt.Response!.CoinsGained);
-            Assert.Equal(2, attempt.Response.XpGained);
+            Assert.Equal(
+                ConfiguredXpReward,
+                attempt.Response.XpGained);
             Assert.True(attempt.Response.CycleRewardGranted);
         });
         Assert.Single(
@@ -431,7 +438,7 @@ public sealed class CropCareConcurrencyTests
         {
             Assert.Equal(cycle.Id, completion.VisitorFarmCareCycleId);
             Assert.Equal(2, completion.CoinsGained);
-            Assert.Equal(2, completion.XpGained);
+            Assert.Equal(ConfiguredXpReward, completion.XpGained);
         });
         Assert.Equal(TimeSpan.FromHours(5), cycle.EndsAt - cycle.StartedAt);
         Assert.True(cycle.RewardGranted);
@@ -445,7 +452,7 @@ public sealed class CropCareConcurrencyTests
                 .Select(inventory => inventory.Coins)
                 .SingleAsync());
         Assert.Equal(
-            4,
+            ConfiguredXpReward * 2,
             await assertContext.Users
                 .Where(user => user.Id == visitorId)
                 .Select(user => user.CurrentXp)
@@ -495,6 +502,8 @@ public sealed class CropCareConcurrencyTests
                 Unlocked = true,
                 SeedId = "corn",
                 PlantedAt = now.AddMinutes(-1),
+                CurrentHarvestCycle = 1,
+                CurrentHarvestCycleStartedAt = now.AddMinutes(-1),
                 ReadyAt = now.AddHours(1),
                 RemainingYield = 3,
                 CareOpportunityId = opportunityId
@@ -615,7 +624,7 @@ public sealed class CropCareConcurrencyTests
             Assert.Equal(now, firstResponse.CaredAt);
             Assert.Equal(now.AddHours(5), firstResponse.NextCareAt);
             Assert.Equal(2, firstResponse.CoinsGained);
-            Assert.Equal(2, firstResponse.XpGained);
+            Assert.Equal(ConfiguredXpReward, firstResponse.XpGained);
         }
 
         var beforeBoundary = now.AddHours(5).AddSeconds(-1);
@@ -677,7 +686,7 @@ public sealed class CropCareConcurrencyTests
                     .Select(inventory => inventory.Coins)
                     .SingleAsync());
             Assert.Equal(
-                2,
+                ConfiguredXpReward,
                 await unchangedContext.Users
                     .Where(user => user.Id == visitorId)
                     .Select(user => user.CurrentXp)
@@ -703,7 +712,7 @@ public sealed class CropCareConcurrencyTests
             Assert.Equal(boundary.AddHours(5), secondResponse.NextCareAt);
             Assert.Equal(opportunityId, secondResponse.CareOpportunityId);
             Assert.Equal(2, secondResponse.CoinsGained);
-            Assert.Equal(2, secondResponse.XpGained);
+            Assert.Equal(ConfiguredXpReward, secondResponse.XpGained);
         }
 
         Assert.NotEqual(
@@ -732,7 +741,7 @@ public sealed class CropCareConcurrencyTests
                 .Select(inventory => inventory.Coins)
                 .SingleAsync());
         Assert.Equal(
-            4,
+            ConfiguredXpReward * 2,
             await assertContext.Users
                 .Where(user => user.Id == visitorId)
                 .Select(user => user.CurrentXp)
@@ -865,7 +874,7 @@ public sealed class CropCareConcurrencyTests
             {
                 Assert.Equal(now, response.CaredAt);
                 Assert.Equal(2, response.CoinsGained);
-                Assert.Equal(2, response.XpGained);
+                Assert.Equal(ConfiguredXpReward, response.XpGained);
             });
 
         await using var assertContext = new AppDbContext(dbOptions);
@@ -884,7 +893,7 @@ public sealed class CropCareConcurrencyTests
                 .Select(inventory => inventory.Coins)
                 .SingleAsync());
         Assert.Equal(
-            6,
+            ConfiguredXpReward * 3,
             await assertContext.Users
                 .Where(user => user.Id == visitorId)
                 .Select(user => user.CurrentXp)
@@ -960,7 +969,10 @@ public sealed class CropCareConcurrencyTests
             inventory.Coins += 50;
             plot.SeedId = null;
             plot.PlantedAt = null;
+            plot.CurrentHarvestCycle = null;
+            plot.CurrentHarvestCycleStartedAt = null;
             plot.ReadyAt = null;
+            plot.RemainingYield = null;
             plot.CareOpportunityId = null;
 
             await mutateContext.SaveChangesAsync();
@@ -1011,7 +1023,7 @@ public sealed class CropCareConcurrencyTests
                 .Select(inventory => inventory.Coins)
                 .SingleAsync());
         Assert.Equal(
-            2,
+            ConfiguredXpReward,
             await assertContext.Users
                 .Where(user => user.Id == visitorId)
                 .Select(user => user.CurrentXp)
@@ -1110,7 +1122,7 @@ public sealed class CropCareConcurrencyTests
                 .Select(inventory => inventory.Coins)
                 .SingleAsync());
         Assert.Equal(
-            2,
+            ConfiguredXpReward,
             await assertContext.Users
                 .Where(user => user.Id == visitorId)
                 .Select(user => user.CurrentXp)
@@ -1379,7 +1391,9 @@ public sealed class CropCareConcurrencyTests
             Assert.True(attempt.Succeeded);
             paulaFifthResponse = attempt.Response!;
             Assert.Equal(2, paulaFifthResponse.CoinsGained);
-            Assert.Equal(2, paulaFifthResponse.XpGained);
+            Assert.Equal(
+                ConfiguredXpReward,
+                paulaFifthResponse.XpGained);
             Assert.Equal(102, paulaFifthResponse.Coins);
             Assert.True(paulaFifthResponse.CycleRewardGranted);
         }
@@ -1421,10 +1435,10 @@ public sealed class CropCareConcurrencyTests
         Assert.Equal(now, anaCurrentCycle.StartedAt);
         Assert.Equal(now.AddHours(5), anaCurrentCycle.EndsAt);
         Assert.Equal(2, paulaCompletion.CoinsGained);
-        Assert.Equal(2, paulaCompletion.XpGained);
+        Assert.Equal(ConfiguredXpReward, paulaCompletion.XpGained);
         Assert.True(paulaCurrentCycle.RewardGranted);
         Assert.Equal(2, paulaCurrentCycle.CoinsReward);
-        Assert.Equal(2, paulaCurrentCycle.XpReward);
+        Assert.Equal(ConfiguredXpReward, paulaCurrentCycle.XpReward);
         Assert.Equal(now, paulaCurrentCycle.StartedAt);
         Assert.Equal(now.AddHours(5), paulaCurrentCycle.EndsAt);
         Assert.All(
@@ -1457,7 +1471,7 @@ public sealed class CropCareConcurrencyTests
                 .Select(inventory => inventory.Coins)
                 .SingleAsync());
         Assert.Equal(
-            2,
+            ConfiguredXpReward,
             await assertContext.Users
                 .Where(user => user.Id == visitorId)
                 .Select(user => user.CurrentXp)
@@ -1819,6 +1833,8 @@ public sealed class CropCareConcurrencyTests
             Unlocked = true,
             SeedId = "corn",
             PlantedAt = now.AddMinutes(-1),
+            CurrentHarvestCycle = 1,
+            CurrentHarvestCycleStartedAt = now.AddMinutes(-1),
             ReadyAt = now.Add(growingFor ?? TimeSpan.FromMinutes(1)),
             RemainingYield = 3,
             CareOpportunityId = opportunityId

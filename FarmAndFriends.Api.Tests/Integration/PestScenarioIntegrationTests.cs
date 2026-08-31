@@ -370,13 +370,14 @@ public sealed class PestScenarioIntegrationTests
         var plot = await assertion.Plots
             .AsNoTracking()
             .SingleAsync(candidate => candidate.Id == plotId);
-        Assert.Equal(2, plot.RemainingYield);
-        Assert.True(plot.ProtectedUntil > now);
-        Assert.Equal(
-            1,
-            await assertion.TheftLogs.CountAsync(log =>
+        var theftLog = await assertion.TheftLogs
+            .AsNoTracking()
+            .SingleAsync(log =>
                 log.PlotId == plotId
-                && log.ThiefUserId == visitorId));
+                && log.ThiefUserId == visitorId);
+        Assert.InRange(theftLog.Quantity, 1, 2);
+        Assert.Equal(3 - theftLog.Quantity, plot.RemainingYield);
+        Assert.True(plot.ProtectedUntil > now);
     }
 
     [PostgresFact]
@@ -909,7 +910,7 @@ public sealed class PestScenarioIntegrationTests
 
     [PostgresFact]
     [Trait("Category", "Postgres")]
-    public async Task Harvest_WithMissingRemainingYield_GrantsNothing()
+    public async Task PlotWithoutRemainingYield_IsRejectedBeforeHarvest()
     {
         var database = DatabaseOptions();
         var now = UtcNowRounded();
@@ -918,47 +919,25 @@ public sealed class PestScenarioIntegrationTests
         var plotId = Guid.NewGuid();
         var inventoryId = Guid.NewGuid();
 
-        await ArrangeFarmAsync(
-            database,
-            ownerId,
-            farmId,
-            ReadyPlotWithoutYield(plotId, farmId, now),
-            new Inventory
-            {
-                Id = inventoryId,
-                UserId = ownerId,
-                Coins = 100
-            });
+        var error = await Assert.ThrowsAsync<DbUpdateException>(() =>
+            ArrangeFarmAsync(
+                database,
+                ownerId,
+                farmId,
+                ReadyPlotWithoutYield(plotId, farmId, now),
+                new Inventory
+                {
+                    Id = inventoryId,
+                    UserId = ownerId,
+                    Coins = 100
+                }));
 
-        await using (var context = new AppDbContext(database))
-        {
-            var action = await CreatePlotController(
-                    context,
-                    ownerId,
-                    now)
-                .Harvest(plotId);
-            AssertYieldUnavailable(action);
-        }
-
-        await using var assertion = new AppDbContext(database);
-        var plot = await assertion.Plots
-            .AsNoTracking()
-            .SingleAsync(candidate => candidate.Id == plotId);
-        var owner = await assertion.Users
-            .AsNoTracking()
-            .SingleAsync(candidate => candidate.Id == ownerId);
-
-        Assert.Equal("corn", plot.SeedId);
-        Assert.Null(plot.RemainingYield);
-        Assert.Equal(0, owner.CurrentXp);
-        Assert.False(await assertion.InventoryItems.AnyAsync(item =>
-            item.InventoryId == inventoryId
-            && item.ItemType == ItemType.Crop));
+        Assert.IsType<Npgsql.PostgresException>(error.InnerException);
     }
 
     [PostgresFact]
     [Trait("Category", "Postgres")]
-    public async Task Theft_WithMissingRemainingYield_GrantsNothing()
+    public async Task PlotWithoutRemainingYield_IsRejectedBeforeTheft()
     {
         var database = DatabaseOptions();
         var now = UtcNowRounded();
@@ -968,48 +947,22 @@ public sealed class PestScenarioIntegrationTests
         var plotId = Guid.NewGuid();
         var visitorInventoryId = Guid.NewGuid();
 
-        await ArrangeFarmAsync(
-            database,
-            ownerId,
-            farmId,
-            ReadyPlotWithoutYield(plotId, farmId, now),
-            CreateUser(visitorId, "visitor"),
-            CreateAcceptedFriendship(ownerId, visitorId),
-            new Inventory
-            {
-                Id = visitorInventoryId,
-                UserId = visitorId,
-                Coins = 100
-            });
+        var error = await Assert.ThrowsAsync<DbUpdateException>(() =>
+            ArrangeFarmAsync(
+                database,
+                ownerId,
+                farmId,
+                ReadyPlotWithoutYield(plotId, farmId, now),
+                CreateUser(visitorId, "visitor"),
+                CreateAcceptedFriendship(ownerId, visitorId),
+                new Inventory
+                {
+                    Id = visitorInventoryId,
+                    UserId = visitorId,
+                    Coins = 100
+                }));
 
-        await using (var context = new AppDbContext(database))
-        {
-            var action = await CreateTheftController(
-                    context,
-                    visitorId,
-                    now)
-                .Steal(farmId, plotId);
-            AssertYieldUnavailable(action);
-        }
-
-        await using var assertion = new AppDbContext(database);
-        var plot = await assertion.Plots
-            .AsNoTracking()
-            .SingleAsync(candidate => candidate.Id == plotId);
-        var visitor = await assertion.Users
-            .AsNoTracking()
-            .SingleAsync(candidate => candidate.Id == visitorId);
-
-        Assert.Null(plot.RemainingYield);
-        Assert.Equal(0, visitor.CurrentXp);
-        Assert.False(await assertion.InventoryItems.AnyAsync(item =>
-            item.InventoryId == visitorInventoryId
-            && item.ItemType == ItemType.Crop));
-        Assert.False(await assertion.TheftLogs.AnyAsync(log =>
-            log.PlotId == plotId));
-        Assert.False(await assertion.Notifications.AnyAsync(notification =>
-            notification.TheftLogId != null
-            && notification.RecipientUserId == ownerId));
+        Assert.IsType<Npgsql.PostgresException>(error.InnerException);
     }
 
     [PostgresFact]
@@ -1243,14 +1196,6 @@ public sealed class PestScenarioIntegrationTests
         Assert.Equal(expectedCode, problem.Extensions["code"]);
     }
 
-    private static void AssertYieldUnavailable(IActionResult action)
-    {
-        var result = Assert.IsType<ObjectResult>(action);
-        var problem = Assert.IsType<ProblemDetails>(result.Value);
-        Assert.Equal(500, result.StatusCode);
-        Assert.Equal("Rendimento do lote indisponível", problem.Title);
-    }
-
     private static DbContextOptions<AppDbContext> DatabaseOptions()
     {
         var connectionString =
@@ -1302,6 +1247,8 @@ public sealed class PestScenarioIntegrationTests
             Unlocked = true,
             SeedId = "corn",
             PlantedAt = now.AddHours(-1),
+            CurrentHarvestCycle = 1,
+            CurrentHarvestCycleStartedAt = now.AddHours(-1),
             ReadyAt = now.AddMinutes(-30),
             RemainingYield = null
         };
@@ -1322,6 +1269,8 @@ public sealed class PestScenarioIntegrationTests
             Unlocked = true,
             SeedId = "corn",
             PlantedAt = now.AddHours(-1),
+            CurrentHarvestCycle = 1,
+            CurrentHarvestCycleStartedAt = now.AddHours(-1),
             ReadyAt = now.AddMinutes(-30),
             RemainingYield = 3,
             PestOccurrenceId = occurrenceId ?? Guid.NewGuid(),

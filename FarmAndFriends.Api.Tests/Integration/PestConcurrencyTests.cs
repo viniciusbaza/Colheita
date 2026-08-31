@@ -280,6 +280,8 @@ public sealed class PestConcurrencyTests
             Unlocked = true,
             SeedId = "corn",
             PlantedAt = now.AddHours(-1),
+            CurrentHarvestCycle = 1,
+            CurrentHarvestCycleStartedAt = now.AddHours(-1),
             ReadyAt = now.AddMinutes(-30),
             RemainingYield = 3,
             PestType = PestType.Caterpillar,

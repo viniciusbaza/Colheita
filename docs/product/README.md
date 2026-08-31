@@ -400,6 +400,13 @@ Improve the farm
 This loop must remain understandable and satisfying without requiring social
 interaction.
 
+Some crops may remain established for a finite number of production cycles.
+Each harvest still gives a clear reward and return deadline; conventional
+crops remain the simple one-cycle case. Recurring crops must not accumulate
+unattended harvests, conceal their total cycle count in the shop or multiply
+losses across cycles. Each new ready window may create another social
+interaction while preserving owner yield and the existing global limits.
+
 Social systems should strengthen the loop rather than make it irrelevant.
 
 ## Social gameplay loop
@@ -855,10 +862,13 @@ Possible metrics include:
 
 * percentage of planted crops eventually harvested;
 * frequency of replanting after harvest;
+* completion rate by recurring-crop cycle;
+* production and XP per occupied plot-hour;
 * number of active plots;
 * failed planting or harvesting attempts;
 * time between harvest and replanting;
-* crop variety used.
+* crop variety used;
+* understanding of regrowth state and remaining harvests.
 
 ### Social health
 

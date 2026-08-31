@@ -18,6 +18,7 @@ public static class CropCareRules
         return plot.Unlocked
             && plot.CareOpportunityId == opportunityId
             && plot.SeedId != null
+            && plot.CurrentHarvestCycleStartedAt <= now
             && plot.ReadyAt > now;
     }
 
@@ -29,7 +30,7 @@ public static class CropCareRules
         return plot.Unlocked
             && plot.CareOpportunityId == opportunityId
             && plot.SeedId != null
-            && plot.PlantedAt <= instant
+            && plot.CurrentHarvestCycleStartedAt <= instant
             && plot.ReadyAt > instant;
     }
 

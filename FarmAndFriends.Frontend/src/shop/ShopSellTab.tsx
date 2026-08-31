@@ -84,7 +84,7 @@ export function ShopSellTab({
     try {
       const response = await sellCrop(cropId, quantity)
       onSuccess(
-        `🪙 Você vendeu ${numberFormatter.format(response.sold)} unidade(s) de ${seed.name} e recebeu ${numberFormatter.format(response.earned)} moedas.`,
+        `🪙 Você vendeu ${numberFormatter.format(response.sold)} unidade(s) de ${seed.cropName} e recebeu ${numberFormatter.format(response.earned)} moedas.`,
       )
       setQuantityOverrides(current => {
         const next = { ...current }
@@ -182,7 +182,7 @@ export function ShopSellTab({
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="truncate font-semibold">
-                    {seed?.name ?? 'Colheita desconhecida'}
+                    {seed?.cropName ?? 'Colheita desconhecida'}
                   </h3>
                   <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900">
                     ×{numberFormatter.format(crop.quantity)}
@@ -209,7 +209,7 @@ export function ShopSellTab({
                   }))}
                   disabled={isBusy}
                   aria-invalid={quantity === null}
-                  aria-label={`Quantidade de ${seed?.name ?? 'colheita'} para vender`}
+                  aria-label={`Quantidade de ${seed?.cropName ?? 'colheita'} para vender`}
                   className="mt-1 w-full rounded-lg border border-emerald-300 bg-white px-3 py-2 text-base text-emerald-950 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-200 disabled:opacity-60"
                 />
               </label>

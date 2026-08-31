@@ -335,6 +335,8 @@ public sealed class FarmMapperTests
         var locked = farm.Plots.First(plot => !plot.Unlocked);
         locked.SeedId = "corn";
         locked.PlantedAt = now.AddHours(-2);
+        locked.CurrentHarvestCycle = 1;
+        locked.CurrentHarvestCycleStartedAt = now.AddHours(-2);
         locked.ReadyAt = now.AddHours(-1);
         locked.RemainingYield = 3;
         locked.ProtectedUntil = now.AddHours(1);
@@ -362,6 +364,7 @@ public sealed class FarmMapperTests
         var lockedResponse = response.Plots.Single(plot => plot.Id == locked.Id);
         Assert.Null(lockedResponse.SeedId);
         Assert.Null(lockedResponse.PlantedAt);
+        Assert.Null(lockedResponse.CurrentHarvestCycle);
         Assert.False(lockedResponse.IsReady);
         Assert.Null(lockedResponse.ReadyAt);
         Assert.Null(lockedResponse.RemainingYield);
@@ -414,6 +417,8 @@ public sealed class FarmMapperTests
             Unlocked = true,
             SeedId = "corn",
             PlantedAt = now,
+            CurrentHarvestCycle = 1,
+            CurrentHarvestCycleStartedAt = now,
             ReadyAt = now.AddDays(7),
             CareOpportunityId = Guid.NewGuid()
         });

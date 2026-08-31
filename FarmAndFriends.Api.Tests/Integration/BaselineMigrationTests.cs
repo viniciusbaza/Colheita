@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Npgsql;
 using Xunit;
 
@@ -44,7 +45,7 @@ public sealed class BaselineMigrationTests
             await using var context = CreateContext(databaseConnectionString);
             await context.Database.MigrateAsync();
 
-            await AssertSingleAppliedMigrationAsync(context);
+            await AssertAllMigrationsAppliedAsync(context);
             var designTimeModel = context.GetService<IDesignTimeModel>().Model;
 
             await using var databaseConnection = new NpgsqlConnection(
@@ -72,14 +73,260 @@ public sealed class BaselineMigrationTests
         }
     }
 
-    private static async Task AssertSingleAppliedMigrationAsync(
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task MultiHarvestMigrations_BackfillExistingDataAndRepairTomatoCatalog()
+    {
+        var configuredConnection = Environment.GetEnvironmentVariable(
+            "CROP_CARE_TEST_CONNECTION")!;
+        var databaseName = $"multi_harvest_upgrade_{Guid.NewGuid():N}";
+        var adminConnectionString = new NpgsqlConnectionStringBuilder(
+            configuredConnection)
+        {
+            Database = "postgres"
+        }.ConnectionString;
+        var databaseConnectionString = new NpgsqlConnectionStringBuilder(
+            configuredConnection)
+        {
+            Database = databaseName
+        }.ConnectionString;
+
+        await using var adminConnection = new NpgsqlConnection(
+            adminConnectionString);
+        await adminConnection.OpenAsync();
+        await using (var createDatabase = new NpgsqlCommand(
+            $"CREATE DATABASE \"{databaseName}\";",
+            adminConnection))
+        {
+            await createDatabase.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            var ownerId = Guid.NewGuid();
+            var farmId = Guid.NewGuid();
+            var occupiedPlotId = Guid.NewGuid();
+            var emptyPlotId = Guid.NewGuid();
+            var plantedAt = new DateTime(
+                2026, 8, 23, 10, 0, 0, DateTimeKind.Utc);
+
+            await using (var initialContext =
+                         CreateContext(databaseConnectionString))
+            {
+                var migrator = initialContext.GetService<IMigrator>();
+                await migrator.MigrateAsync(
+                    "20260818050938_InitialCreate");
+
+                await initialContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    INSERT INTO "Users"
+                        ("Id", "Username", "NormalizedUsername", "PasswordHash", "CurrentXp")
+                    VALUES
+                        ({ownerId}, 'upgrade_owner', 'UPGRADE_OWNER', 'test', 0);
+                    """);
+                await initialContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    INSERT INTO "Farms" ("Id", "Name", "UserId")
+                    VALUES ({farmId}, 'Upgrade farm', {ownerId});
+                    """);
+                await initialContext.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                    INSERT INTO "Plots"
+                        ("Id", "FarmId", "X", "Y", "Unlocked", "SeedId",
+                         "PlantedAt", "ReadyAt", "RemainingYield",
+                         "PestConsumedAmount")
+                    VALUES
+                        ({occupiedPlotId}, {farmId}, 0, 0, TRUE, 'corn',
+                         {plantedAt}, {plantedAt.AddMinutes(2)}, 3, 0),
+                        ({emptyPlotId}, {farmId}, 1, 0, TRUE, NULL,
+                         NULL, NULL, NULL, 0);
+                    """);
+                await initialContext.Database.ExecuteSqlRawAsync(
+                    """
+                    INSERT INTO "Seeds"
+                        ("Id", "Name", "Icon", "BuyPrice", "SellPrice",
+                         "GrowTime", "TheftChancePercent", "MinLevel",
+                         "CropId", "CropAmount")
+                    VALUES
+                        ('legacy_custom', 'Legado', 'L', 1, 2,
+                         60, 0, 1, 'legacy_crop', 1);
+                    """);
+
+                await migrator.MigrateAsync(
+                    "20260824014226_MultiHarvestCrops");
+
+                await AssertTomatoConfigurationAsync(
+                    initialContext,
+                    harvestCycles: 1,
+                    regrowTime: null);
+
+                await migrator.MigrateAsync();
+            }
+
+            await using var assertion = CreateContext(
+                databaseConnectionString);
+            var legacySeed = await assertion.Seeds
+                .AsNoTracking()
+                .SingleAsync(seed => seed.Id == "legacy_custom");
+            var tomatoSeed = await assertion.Seeds
+                .AsNoTracking()
+                .SingleAsync(seed => seed.Id == "tomato");
+            var occupiedPlot = await assertion.Plots
+                .AsNoTracking()
+                .SingleAsync(plot => plot.Id == occupiedPlotId);
+            var emptyPlot = await assertion.Plots
+                .AsNoTracking()
+                .SingleAsync(plot => plot.Id == emptyPlotId);
+
+            Assert.Equal("Legado", legacySeed.CropName);
+            Assert.Equal(1, legacySeed.HarvestCycles);
+            Assert.Null(legacySeed.RegrowTime);
+            Assert.Equal("Tomate", tomatoSeed.CropName);
+            Assert.Equal(2, tomatoSeed.HarvestCycles);
+            Assert.Equal(TimeSpan.FromMinutes(2), tomatoSeed.RegrowTime);
+            Assert.Equal(1, occupiedPlot.CurrentHarvestCycle);
+            Assert.Equal(plantedAt, occupiedPlot.CurrentHarvestCycleStartedAt);
+            Assert.Null(emptyPlot.CurrentHarvestCycle);
+            Assert.Null(emptyPlot.CurrentHarvestCycleStartedAt);
+            Assert.Empty(await assertion.Database
+                .GetPendingMigrationsAsync());
+
+            var emptyWithDeadline = await Assert.ThrowsAsync<PostgresException>(
+                () => assertion.Database.ExecuteSqlRawAsync(
+                    """
+                    UPDATE "Plots"
+                    SET "ReadyAt" = NOW()
+                    WHERE "Id" = {0};
+                    """,
+                    emptyPlotId));
+            Assert.Equal(
+                PostgresErrorCodes.CheckViolation,
+                emptyWithDeadline.SqlState);
+
+            var occupiedWithoutDeadline =
+                await Assert.ThrowsAsync<PostgresException>(
+                    () => assertion.Database.ExecuteSqlRawAsync(
+                        """
+                        UPDATE "Plots"
+                        SET "ReadyAt" = NULL
+                        WHERE "Id" = {0};
+                        """,
+                        occupiedPlotId));
+            Assert.Equal(
+                PostgresErrorCodes.CheckViolation,
+                occupiedWithoutDeadline.SqlState);
+        }
+        finally
+        {
+            await using var dropDatabase = new NpgsqlCommand(
+                $"DROP DATABASE \"{databaseName}\" WITH (FORCE);",
+                adminConnection);
+            await dropDatabase.ExecuteNonQueryAsync();
+        }
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task RepairTomatoMigration_DowngradesAndReappliesConsistently()
+    {
+        var configuredConnection = Environment.GetEnvironmentVariable(
+            "CROP_CARE_TEST_CONNECTION")!;
+        var databaseName = $"tomato_repair_cycle_{Guid.NewGuid():N}";
+        var adminConnectionString = new NpgsqlConnectionStringBuilder(
+            configuredConnection)
+        {
+            Database = "postgres"
+        }.ConnectionString;
+        var databaseConnectionString = new NpgsqlConnectionStringBuilder(
+            configuredConnection)
+        {
+            Database = databaseName
+        }.ConnectionString;
+
+        await using var adminConnection = new NpgsqlConnection(
+            adminConnectionString);
+        await adminConnection.OpenAsync();
+        await using (var createDatabase = new NpgsqlCommand(
+            $"CREATE DATABASE \"{databaseName}\";",
+            adminConnection))
+        {
+            await createDatabase.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            await using var context = CreateContext(
+                databaseConnectionString);
+            var migrator = context.GetService<IMigrator>();
+
+            await migrator.MigrateAsync();
+            await AssertTomatoConfigurationAsync(
+                context,
+                harvestCycles: 2,
+                regrowTime: TimeSpan.FromMinutes(2));
+            await AssertAllMigrationsAppliedAsync(context);
+
+            await migrator.MigrateAsync(
+                "20260824014226_MultiHarvestCrops");
+            await AssertTomatoConfigurationAsync(
+                context,
+                harvestCycles: 1,
+                regrowTime: null);
+            Assert.Equal(
+                [
+                    "20260818050938_InitialCreate",
+                    "20260824014226_MultiHarvestCrops"
+                ],
+                (await context.Database.GetAppliedMigrationsAsync())
+                .ToArray());
+            Assert.Equal(
+                ["20260828041558_RepairTomatoMultiHarvestConfiguration"],
+                (await context.Database.GetPendingMigrationsAsync())
+                .ToArray());
+
+            await migrator.MigrateAsync();
+            await AssertTomatoConfigurationAsync(
+                context,
+                harvestCycles: 2,
+                regrowTime: TimeSpan.FromMinutes(2));
+            await AssertAllMigrationsAppliedAsync(context);
+        }
+        finally
+        {
+            await using var dropDatabase = new NpgsqlCommand(
+                $"DROP DATABASE \"{databaseName}\" WITH (FORCE);",
+                adminConnection);
+            await dropDatabase.ExecuteNonQueryAsync();
+        }
+    }
+
+    private static async Task AssertTomatoConfigurationAsync(
+        AppDbContext context,
+        int harvestCycles,
+        TimeSpan? regrowTime)
+    {
+        var tomato = await context.Seeds
+            .AsNoTracking()
+            .SingleAsync(seed => seed.Id == "tomato");
+
+        Assert.Equal(harvestCycles, tomato.HarvestCycles);
+        Assert.Equal(regrowTime, tomato.RegrowTime);
+    }
+
+    private static async Task AssertAllMigrationsAppliedAsync(
         AppDbContext context)
     {
         var availableMigrations = context.Database
             .GetMigrations()
             .ToArray();
-        var initialCreate = Assert.Single(availableMigrations);
-        Assert.EndsWith("_InitialCreate", initialCreate);
+        Assert.Equal(3, availableMigrations.Length);
+        Assert.Equal(
+            "20260818050938_InitialCreate",
+            availableMigrations[0]);
+        Assert.EndsWith("_MultiHarvestCrops", availableMigrations[1]);
+        Assert.EndsWith(
+            "_RepairTomatoMultiHarvestConfiguration",
+            availableMigrations[2]);
         Assert.Equal(
             availableMigrations,
             (await context.Database.GetAppliedMigrationsAsync()).ToArray());
@@ -370,14 +617,17 @@ public sealed class BaselineMigrationTests
             .Select(seed => new SeedCatalogEntry(
                 seed.Id,
                 seed.Name,
+                seed.CropName,
                 seed.Icon,
                 seed.BuyPrice,
                 seed.SellPrice,
                 seed.GrowTime,
+                seed.RegrowTime,
                 seed.TheftChancePercent,
                 seed.MinLevel,
                 seed.CropId,
-                seed.CropAmount))
+                seed.CropAmount,
+                seed.HarvestCycles))
             .ToArrayAsync();
         Assert.Equal(ExpectedSeeds, actualSeeds);
     }
@@ -566,25 +816,35 @@ public sealed class BaselineMigrationTests
 
     private static readonly SeedCatalogEntry[] ExpectedSeeds =
     [
-        new("carrot", "Cenoura", "🥕", 10, 20, TimeSpan.FromMinutes(5),
-            100, 1, "carrot_crop", 1),
-        new("corn", "Milho", "🌽", 20, 45, TimeSpan.FromMinutes(2),
-            100, 2, "corn_crop", 3),
-        new("pumpkin", "Abóbora", "🎃", 40, 80, TimeSpan.FromMinutes(2),
-            100, 4, "pumpkin_crop", 5),
-        new("tomato", "Tomate", "🍅", 30, 60, TimeSpan.FromMinutes(2),
-            100, 3, "tomato_crop", 4)
+        new("apple_tree", "Macieira", "Maçã", "🍎", 90, 30,
+            TimeSpan.FromHours(2), TimeSpan.FromHours(1),
+            100, 5, "apple_crop", 3, 3),
+        new("carrot", "Cenoura", "Cenoura", "🥕", 10, 20,
+            TimeSpan.FromMinutes(5), null,
+            100, 1, "carrot_crop", 1, 1),
+        new("corn", "Milho", "Milho", "🌽", 20, 45,
+            TimeSpan.FromMinutes(2), null,
+            100, 2, "corn_crop", 3, 1),
+        new("pumpkin", "Abóbora", "Abóbora", "🎃", 40, 80,
+            TimeSpan.FromMinutes(2), null,
+            100, 4, "pumpkin_crop", 5, 1),
+        new("tomato", "Tomate", "Tomate", "🍅", 30, 60,
+            TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2),
+            100, 3, "tomato_crop", 4, 2)
     ];
 
     private sealed record SeedCatalogEntry(
         string Id,
         string Name,
+        string CropName,
         string Icon,
         int BuyPrice,
         int SellPrice,
         TimeSpan GrowTime,
+        TimeSpan? RegrowTime,
         int TheftChancePercent,
         int MinLevel,
         string CropId,
-        int CropAmount);
+        int CropAmount,
+        int HarvestCycles);
 }

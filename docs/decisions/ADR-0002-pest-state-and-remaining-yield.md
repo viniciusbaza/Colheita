@@ -1,6 +1,6 @@
 # ADR-0002 — Pest State and Authoritative Remaining Yield
 
-Status: Accepted, amended 2026-08-01
+Status: Accepted, amended 2026-08-01 and 2026-08-23
 
 Date: 2026-07-30
 
@@ -104,12 +104,14 @@ Disadvantages:
 
 Use Option C.
 
-`Plot.RemainingYield` is the only authoritative amount for a planted crop:
+`Plot.RemainingYield` is the only authoritative amount for the current
+production cycle:
 
-- planting initializes it;
+- planting and every later production cycle initialize it;
 - theft and pest consumption reduce it;
 - harvesting awards it;
-- harvesting clears it.
+- an intermediate harvest resets it for the next cycle;
+- the final harvest clears it.
 
 `TheftLog` remains an audit and limit ledger. It does not reconstruct the
 current yield.
@@ -118,9 +120,11 @@ The plot persists one pest type, an explicit pest status, scheduling and
 resolution timestamps, the consumed amount, a stable `PestOccurrenceId` and
 `ProtectedUntil`.
 
-A pest status other than `None` proves that the current crop cycle has already
-received its single infestation. Planting resets pest-cycle fields but does not
-clear an unexpired protection timestamp.
+A pest status other than `None` proves that the current production cycle has
+already received its single infestation. Planting and an intermediate harvest
+reset pest-cycle fields but do not clear an unexpired protection timestamp.
+Each new production cycle is therefore a new pest opportunity, still subject
+to farm-wide caps, intervals and plot protection.
 
 The farm persists the last infestation appearance needed to enforce the
 configured interval.
@@ -192,7 +196,7 @@ reward limit across farms. Reprocessing a terminal infestation is a no-op.
 - Do not consume an item when protection is already valid and stacking is not
   allowed.
 - Keep protection independent from theft permission.
-- Keep terminal transition reasons explicit until the next planting.
+- Keep terminal transition reasons explicit until the next production cycle.
 - Use additive API fields and let `farm:sync` replace browser state.
 - Do not expand `PestRemovalCompletion` into a generic infestation event log
   until a product requirement needs full history, multiple occurrences or

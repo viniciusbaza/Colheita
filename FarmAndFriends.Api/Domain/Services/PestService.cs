@@ -21,7 +21,8 @@ public enum PestActionFailure
     ItemUnavailable,
     FeatureDisabled,
     IdempotencyKeyReused,
-    PestOccurrenceMismatch
+    PestOccurrenceMismatch,
+    CropCycleStateInvalid
 }
 
 public sealed record PestActionAttempt(
@@ -92,16 +93,18 @@ public sealed class PestService
         DateTime now,
         CancellationToken cancellationToken = default)
     {
-        foreach (var plot in plots.Where(plot =>
-                     plot.PestOccurrenceId == null
-                     && plot.PestStatus is (
-                         PestStatus.Scheduled or PestStatus.Active)))
-        {
-            PestRules.EnsureOccurrenceIdentity(plot);
-        }
-
         if (!_options.Enabled)
+        {
+            foreach (var plot in plots.Where(plot =>
+                         plot.PestOccurrenceId == null
+                         && plot.PestStatus is (
+                             PestStatus.Scheduled or PestStatus.Active)))
+            {
+                PestRules.EnsureOccurrenceIdentity(plot);
+            }
+
             return;
+        }
 
         var seedIds = plots
             .Where(plot => plot.SeedId != null)
@@ -111,8 +114,23 @@ public sealed class PestService
         var seeds = await _context.Seeds
             .Where(seed => seedIds.Contains(seed.Id))
             .ToDictionaryAsync(seed => seed.Id, cancellationToken);
+        var validCropPlotIds = plots
+            .Where(plot => HasValidCropCycle(plot, seeds))
+            .Select(plot => plot.Id)
+            .ToHashSet();
 
-        foreach (var plot in plots.OrderBy(plot => plot.Id))
+        foreach (var plot in plots.Where(plot =>
+                     validCropPlotIds.Contains(plot.Id)
+                     && plot.PestOccurrenceId == null
+                     && plot.PestStatus is (
+                         PestStatus.Scheduled or PestStatus.Active)))
+        {
+            PestRules.EnsureOccurrenceIdentity(plot);
+        }
+
+        foreach (var plot in plots
+                     .Where(plot => validCropPlotIds.Contains(plot.Id))
+                     .OrderBy(plot => plot.Id))
         {
             if (PestRules.IsProtected(plot, now))
                 PestRules.CancelByProtection(plot, now);
@@ -127,7 +145,7 @@ public sealed class PestService
                 {
                     var cropName = plot.SeedId != null
                         && seeds.TryGetValue(plot.SeedId, out var seed)
-                            ? seed.Name.ToLowerInvariant()
+                            ? seed.CropName.ToLowerInvariant()
                             : "cultura";
                     _context.Notifications.Add(new Notification
                     {
@@ -142,7 +160,9 @@ public sealed class PestService
             }
         }
 
-        foreach (var plot in plots.OrderBy(plot => plot.Id))
+        foreach (var plot in plots
+                     .Where(plot => validCropPlotIds.Contains(plot.Id))
+                     .OrderBy(plot => plot.Id))
         {
             if (plot.SeedId == null
                 || !seeds.TryGetValue(plot.SeedId, out var seed)
@@ -164,12 +184,14 @@ public sealed class PestService
             PestRules.Schedule(plot, now, appearsAt);
         }
 
-        var activeCount = plots.Count(
-            plot => plot.PestStatus == PestStatus.Active);
+        var activeCount = plots.Count(plot =>
+            validCropPlotIds.Contains(plot.Id)
+            && plot.PestStatus == PestStatus.Active);
 
         foreach (var plot in plots
                      .Where(plot =>
-                         plot.PestStatus == PestStatus.Scheduled)
+                         validCropPlotIds.Contains(plot.Id)
+                         && plot.PestStatus == PestStatus.Scheduled)
                      .OrderBy(plot => plot.PestAppearsAt)
                      .ThenBy(plot => plot.Id))
         {
@@ -270,6 +292,10 @@ public sealed class PestService
 
         if (plot.PestOccurrenceId != expectedOccurrenceId)
             return new(PestActionFailure.PestOccurrenceMismatch);
+
+        if (plot.SeedId != null
+            && !await HasValidCropCycleAsync(plot, cancellationToken))
+            return new(PestActionFailure.CropCycleStateInvalid);
 
         var now = UtcNow;
         await ProcessLockedFarmAsync(
@@ -404,6 +430,12 @@ public sealed class PestService
 
         if (plot == null || !plot.Unlocked)
             return new(PestActionFailure.PlotNotFound);
+
+        if (plot.SeedId != null
+            && !await HasValidCropCycleAsync(plot, cancellationToken))
+        {
+            return new(PestActionFailure.CropCycleStateInvalid);
+        }
 
         var now = UtcNow;
         await ProcessLockedFarmAsync(
@@ -604,6 +636,52 @@ public sealed class PestService
                 && friendship.UserBId == userBId
                 && friendship.Status == FriendshipStatus.Accepted,
             cancellationToken);
+    }
+
+    private async Task<bool> HasValidCropCycleAsync(
+        Plot plot,
+        CancellationToken cancellationToken)
+    {
+        if (plot.SeedId == null)
+            return false;
+
+        var seed = await _context.Seeds
+            .SingleOrDefaultAsync(
+                candidate => candidate.Id == plot.SeedId,
+                cancellationToken);
+        if (seed == null)
+            return false;
+
+        try
+        {
+            CropCycleRules.ValidateCurrentCycle(plot, seed);
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HasValidCropCycle(
+        Plot plot,
+        IReadOnlyDictionary<string, Seed> seeds)
+    {
+        if (plot.SeedId == null
+            || !seeds.TryGetValue(plot.SeedId, out var seed))
+        {
+            return false;
+        }
+
+        try
+        {
+            CropCycleRules.ValidateCurrentCycle(plot, seed);
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private static void ResolveScheduledAfterTheft(

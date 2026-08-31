@@ -136,7 +136,7 @@ public class FarmsController : ControllerBase
             .OrderByDescending(log => log.CreatedAt)
             .Select(log => new TheftLogResponse(
                 log.ThiefUser.Username,
-                log.Seed.Name,
+                log.Seed.CropName,
                 log.Quantity,
                 log.GotBonus,
                 log.CreatedAt))
@@ -170,8 +170,8 @@ public class FarmsController : ControllerBase
             .Take(10)
             .Select(log => new TheftNotificationResponse(
                 log.GotBonus
-                    ? $"{log.ThiefUser.Username} te roubou {log.Quantity} {log.Seed.Name}(s) e ganhou bônus, sortudo! ⭐"
-                    : $"{log.ThiefUser.Username} roubou {log.Quantity} {log.Seed.Name}(s)",
+                    ? $"{log.ThiefUser.Username} te roubou {log.Quantity} {log.Seed.CropName}(s) e ganhou bônus, sortudo! ⭐"
+                    : $"{log.ThiefUser.Username} roubou {log.Quantity} {log.Seed.CropName}(s)",
                 log.CreatedAt))
             .ToListAsync();
 

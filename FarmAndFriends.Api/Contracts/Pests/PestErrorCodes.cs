@@ -18,4 +18,6 @@ public static class PestErrorCodes
         "PEST_OCCURRENCE_ID_REQUIRED";
     public const string OccurrenceMismatch =
         "PEST_OCCURRENCE_MISMATCH";
+    public const string CropCycleStateInvalid =
+        "PEST_CROP_CYCLE_STATE_INVALID";
 }

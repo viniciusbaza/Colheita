@@ -202,7 +202,10 @@ namespace FarmAndFriends.Api.Migrations
 
                     b.HasIndex("InventoryId");
 
-                    b.ToTable("InventoryItems");
+                    b.ToTable("InventoryItems", t =>
+                        {
+                            t.HasCheckConstraint("CK_InventoryItems_Quantity_NonNegative", "\"Quantity\" >= 0");
+                        });
                 });
 
             modelBuilder.Entity("FarmAndFriends.Api.Domain.Entities.LandPurchaseCompletion", b =>
@@ -421,6 +424,12 @@ namespace FarmAndFriends.Api.Migrations
                     b.Property<Guid?>("CareOpportunityId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("CurrentHarvestCycle")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("CurrentHarvestCycleStartedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("FarmId")
                         .HasColumnType("uuid");
 
@@ -490,6 +499,10 @@ namespace FarmAndFriends.Api.Migrations
                     b.ToTable("Plots", t =>
                         {
                             t.HasCheckConstraint("CK_Plots_Coordinates_NonNegative", "\"X\" >= 0 AND \"Y\" >= 0");
+
+                            t.HasCheckConstraint("CK_Plots_CurrentHarvestCycleStartedAt_Consistent", "(\"SeedId\" IS NULL AND \"PlantedAt\" IS NULL AND \"ReadyAt\" IS NULL AND \"RemainingYield\" IS NULL AND \"CurrentHarvestCycleStartedAt\" IS NULL) OR (\"SeedId\" IS NOT NULL AND \"PlantedAt\" IS NOT NULL AND \"ReadyAt\" IS NOT NULL AND \"RemainingYield\" IS NOT NULL AND \"CurrentHarvestCycleStartedAt\" IS NOT NULL AND \"ReadyAt\" > \"CurrentHarvestCycleStartedAt\")");
+
+                            t.HasCheckConstraint("CK_Plots_CurrentHarvestCycle_Consistent", "(\"SeedId\" IS NULL AND \"CurrentHarvestCycle\" IS NULL) OR (\"SeedId\" IS NOT NULL AND \"CurrentHarvestCycle\" IS NOT NULL AND \"CurrentHarvestCycle\" >= 1)");
 
                             t.HasCheckConstraint("CK_Plots_PestConsumedAmount_NonNegative", "\"PestConsumedAmount\" >= 0");
 
@@ -676,8 +689,17 @@ namespace FarmAndFriends.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("CropName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<double>("GrowTime")
                         .HasColumnType("double precision");
+
+                    b.Property<int>("HarvestCycles")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
 
                     b.Property<string>("Icon")
                         .IsRequired()
@@ -690,6 +712,9 @@ namespace FarmAndFriends.Api.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<double?>("RegrowTime")
+                        .HasColumnType("double precision");
+
                     b.Property<int>("SellPrice")
                         .HasColumnType("integer");
 
@@ -698,7 +723,18 @@ namespace FarmAndFriends.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Seeds");
+                    b.ToTable("Seeds", t =>
+                        {
+                            t.HasCheckConstraint("CK_Seeds_CropAmount_Positive", "\"CropAmount\" >= 1");
+
+                            t.HasCheckConstraint("CK_Seeds_GrowTime_Positive", "\"GrowTime\" > 0");
+
+                            t.HasCheckConstraint("CK_Seeds_HarvestCycles_Positive", "\"HarvestCycles\" >= 1");
+
+                            t.HasCheckConstraint("CK_Seeds_RegrowTime_Consistent", "(\"HarvestCycles\" = 1 AND \"RegrowTime\" IS NULL) OR (\"HarvestCycles\" > 1 AND \"RegrowTime\" > 0)");
+
+                            t.HasCheckConstraint("CK_Seeds_RequiredText_NotBlank", "length(btrim(\"Id\")) > 0 AND length(btrim(\"Name\")) > 0 AND length(btrim(\"CropId\")) > 0 AND length(btrim(\"CropName\")) > 0");
+                        });
 
                     b.HasData(
                         new
@@ -707,7 +743,9 @@ namespace FarmAndFriends.Api.Migrations
                             BuyPrice = 10,
                             CropAmount = 1,
                             CropId = "carrot_crop",
+                            CropName = "Cenoura",
                             GrowTime = 300.0,
+                            HarvestCycles = 1,
                             Icon = "🥕",
                             MinLevel = 1,
                             Name = "Cenoura",
@@ -720,7 +758,9 @@ namespace FarmAndFriends.Api.Migrations
                             BuyPrice = 20,
                             CropAmount = 3,
                             CropId = "corn_crop",
+                            CropName = "Milho",
                             GrowTime = 120.0,
+                            HarvestCycles = 1,
                             Icon = "🌽",
                             MinLevel = 2,
                             Name = "Milho",
@@ -733,10 +773,13 @@ namespace FarmAndFriends.Api.Migrations
                             BuyPrice = 30,
                             CropAmount = 4,
                             CropId = "tomato_crop",
+                            CropName = "Tomate",
                             GrowTime = 120.0,
+                            HarvestCycles = 2,
                             Icon = "🍅",
                             MinLevel = 3,
                             Name = "Tomate",
+                            RegrowTime = 120.0,
                             SellPrice = 60,
                             TheftChancePercent = 100
                         },
@@ -746,11 +789,29 @@ namespace FarmAndFriends.Api.Migrations
                             BuyPrice = 40,
                             CropAmount = 5,
                             CropId = "pumpkin_crop",
+                            CropName = "Abóbora",
                             GrowTime = 120.0,
+                            HarvestCycles = 1,
                             Icon = "🎃",
                             MinLevel = 4,
                             Name = "Abóbora",
                             SellPrice = 80,
+                            TheftChancePercent = 100
+                        },
+                        new
+                        {
+                            Id = "apple_tree",
+                            BuyPrice = 90,
+                            CropAmount = 3,
+                            CropId = "apple_crop",
+                            CropName = "Maçã",
+                            GrowTime = 7200.0,
+                            HarvestCycles = 3,
+                            Icon = "🍎",
+                            MinLevel = 5,
+                            Name = "Macieira",
+                            RegrowTime = 3600.0,
+                            SellPrice = 30,
                             TheftChancePercent = 100
                         });
                 });

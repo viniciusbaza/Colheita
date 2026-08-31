@@ -7,6 +7,7 @@ using FarmAndFriends.Api.Domain.Services;
 using FarmAndFriends.Api.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 
 namespace FarmAndFriends.Api.Controllers;
@@ -68,6 +69,15 @@ public class PlotController : ControllerBase
         if (seed == null)
             return BadRequest("Semente inválida.");
 
+        try
+        {
+            CropCycleRules.ValidateSeedConfiguration(seed);
+        }
+        catch (InvalidOperationException)
+        {
+            return CropCycleStateInvalid();
+        }
+
         var inventory = await _context.Inventories
             .Include(candidate => candidate.Items)
             .FirstOrDefaultAsync(candidate => candidate.UserId == userId);
@@ -87,10 +97,7 @@ public class PlotController : ControllerBase
             _context.InventoryItems.Remove(seedItem);
 
         var now = _pestService.UtcNow;
-        plot.SeedId = seed.Id;
-        plot.PlantedAt = now;
-        plot.ReadyAt = now.Add(seed.GrowTime);
-        plot.RemainingYield = seed.CropAmount;
+        CropCycleRules.StartPlanting(plot, seed, now);
         PestRules.ResetCycle(plot);
         CropCareRules.StartCurrentCropCycle(plot);
 
@@ -100,18 +107,20 @@ public class PlotController : ControllerBase
         await _context.SaveChangesAsync();
         await transaction.CommitAsync();
 
-        return Ok(new
-        {
+        return Ok(new PlantResponse(
             plot.Id,
-            seed = seed.Name,
-            plot.PlantedAt,
-            plot.ReadyAt,
-            xpGained
-        });
+            seed.Name,
+            plot.PlantedAt!.Value,
+            plot.ReadyAt!.Value,
+            plot.CurrentHarvestCycle!.Value,
+            xpGained));
     }
 
     [HttpPost("{plotId}/harvest")]
-    public async Task<IActionResult> Harvest(Guid plotId)
+    public async Task<IActionResult> Harvest(
+        Guid plotId,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)]
+        HarvestCropRequest? request = null)
     {
         if (!TryGetCurrentUserId(out var userId))
             return Unauthorized();
@@ -138,7 +147,40 @@ public class PlotController : ControllerBase
         await _pestService.ProcessLockedFarmAsync(farm, plots, now);
 
         if (plot.SeedId == null)
+        {
+            if (request?.ExpectedHarvestCycle != null)
+            {
+                return HarvestCycleMismatch(
+                    request.ExpectedHarvestCycle,
+                    currentHarvestCycle: null);
+            }
+
             return BadRequest("Nenhuma plantação para colher.");
+        }
+
+        var seed = await _context.Seeds
+            .FirstOrDefaultAsync(candidate => candidate.Id == plot.SeedId);
+
+        if (seed == null)
+            return CropCycleStateInvalid();
+
+        try
+        {
+            CropCycleRules.ValidateCurrentCycle(plot, seed);
+        }
+        catch (InvalidOperationException)
+        {
+            return CropCycleStateInvalid();
+        }
+
+        if (seed.HarvestCycles > 1
+            && request?.ExpectedHarvestCycle
+                != plot.CurrentHarvestCycle)
+        {
+            return HarvestCycleMismatch(
+                request?.ExpectedHarvestCycle,
+                plot.CurrentHarvestCycle);
+        }
 
         if (plot.ReadyAt == null || plot.ReadyAt > now)
             return BadRequest("A plantação ainda não está pronta.");
@@ -148,12 +190,6 @@ public class PlotController : ControllerBase
         {
             return YieldUnavailable();
         }
-
-        var seed = await _context.Seeds
-            .FirstOrDefaultAsync(candidate => candidate.Id == plot.SeedId);
-
-        if (seed == null)
-            return BadRequest("Semente inválida.");
 
         var inventory = await _context.Inventories
             .Include(candidate => candidate.Items)
@@ -166,6 +202,10 @@ public class PlotController : ControllerBase
             item.ItemType == ItemType.Crop
             && item.ItemId == seed.CropId);
 
+        var inventoryTotal = (long)(cropItem?.Quantity ?? 0) + finalYield;
+        if (inventoryTotal is < 0 or > int.MaxValue)
+            return InventoryCapacityExceeded();
+
         if (cropItem == null)
         {
             cropItem = new InventoryItem
@@ -174,36 +214,41 @@ public class PlotController : ControllerBase
                 InventoryId = inventory.Id,
                 ItemType = ItemType.Crop,
                 ItemId = seed.CropId,
-                Quantity = finalYield
+                Quantity = (int)inventoryTotal
             };
             _context.InventoryItems.Add(cropItem);
         }
         else
         {
-            cropItem.Quantity += finalYield;
+            cropItem.Quantity = (int)inventoryTotal;
         }
 
         PestRules.CancelByHarvest(plot, now);
-        plot.SeedId = null;
-        plot.PlantedAt = null;
-        plot.ReadyAt = null;
-        plot.RemainingYield = null;
-        CropCareRules.ClearCurrentOpportunity(plot);
+        var transition = CropCycleRules.CompleteHarvest(plot, seed, now);
+        if (transition.HasNextCycle)
+        {
+            PestRules.ResetCycle(plot);
+            CropCareRules.StartCurrentCropCycle(plot);
+        }
+        else
+        {
+            CropCareRules.ClearCurrentOpportunity(plot);
+        }
 
-        var xpGained = 25 * seed.MinLevel;
+        var xpGained = checked(25 * seed.MinLevel);
         _experienceService.AddXp(lockedUser, xpGained);
 
         await _context.SaveChangesAsync();
         await transaction.CommitAsync();
 
-        return Ok(new
-        {
+        return Ok(new HarvestResponse(
             plot.Id,
-            crop = seed.CropId,
-            amount = finalYield,
-            inventoryTotal = cropItem.Quantity,
-            xpGained
-        });
+            seed.CropId,
+            finalYield,
+            cropItem.Quantity,
+            xpGained,
+            transition.CurrentHarvestCycle,
+            transition.ReadyAt));
     }
 
     private async Task<Guid?> FindFarmIdAsync(Guid plotId) =>
@@ -224,4 +269,48 @@ public class PlotController : ControllerBase
                 "O rendimento persistido deste lote está ausente ou inválido. Nenhuma colheita foi concedida.",
             statusCode: StatusCodes.Status500InternalServerError,
             title: "Rendimento do lote indisponível");
+
+    private ObjectResult HarvestCycleMismatch(
+        int? expectedHarvestCycle,
+        int? currentHarvestCycle)
+    {
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title = "Ciclo de colheita desatualizado",
+            Detail =
+                "A plantação avançou ou foi encerrada. Atualize o lote antes de colher novamente."
+        };
+        problem.Extensions["code"] = PlotErrorCodes.HarvestCycleMismatch;
+        problem.Extensions["expectedHarvestCycle"] = expectedHarvestCycle;
+        problem.Extensions["currentHarvestCycle"] = currentHarvestCycle;
+        return StatusCode(StatusCodes.Status409Conflict, problem);
+    }
+
+    private ObjectResult CropCycleStateInvalid()
+    {
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status500InternalServerError,
+            Title = "Estado produtivo do lote inválido",
+            Detail =
+                "O ciclo produtivo persistido está inconsistente. Nenhuma recompensa foi concedida."
+        };
+        problem.Extensions["code"] = PlotErrorCodes.CropCycleStateInvalid;
+        return StatusCode(StatusCodes.Status500InternalServerError, problem);
+    }
+
+    private ObjectResult InventoryCapacityExceeded()
+    {
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title = "Limite de estoque atingido",
+            Detail =
+                "Não há espaço numérico para adicionar esta colheita ao inventário. Nenhuma recompensa foi concedida."
+        };
+        problem.Extensions["code"] =
+            PlotErrorCodes.InventoryCapacityExceeded;
+        return StatusCode(StatusCodes.Status409Conflict, problem);
+    }
 }

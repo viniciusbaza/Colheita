@@ -95,7 +95,12 @@ export type PlantResponse = {
   seed: string
   plantedAt: string
   readyAt: string
+  currentHarvestCycle: number
   xpGained: number
+}
+
+export type HarvestRequest = {
+  expectedHarvestCycle: number
 }
 
 export type HarvestResponse = {
@@ -104,6 +109,8 @@ export type HarvestResponse = {
   amount: number
   inventoryTotal: number
   xpGained: number
+  currentHarvestCycle: number | null
+  readyAt: string | null
 }
 
 export type PestStatus =
@@ -187,6 +194,7 @@ export type Plot = {
   unlocked: boolean
   seedId?: string | null
   plantedAt?: string | null
+  currentHarvestCycle: number | null
   isReady: boolean
   readyAt?: string | null
   remainingYield: number | null
@@ -210,10 +218,13 @@ export type Farm = {
 export type Seed = {
   id: string
   name: string
+  cropName: string
   icon: string
   buyPrice: number
   sellPrice: number
-  growTime: string // "HH:mm:ss"
+  growTime: string // "HH:mm:ss" or "d.HH:mm:ss"
+  regrowTime: string | null
+  harvestCycles: number
   theftChancePercent: number
   minLevel: number
   cropId: string

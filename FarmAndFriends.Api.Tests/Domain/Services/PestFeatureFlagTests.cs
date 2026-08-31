@@ -42,6 +42,9 @@ public sealed class PestFeatureFlagTests
             FarmId = farm.Id,
             Unlocked = true,
             SeedId = "corn",
+            PlantedAt = Now.AddHours(-1),
+            CurrentHarvestCycle = 1,
+            CurrentHarvestCycleStartedAt = Now.AddHours(-1),
             ReadyAt = Now.AddMinutes(-30),
             RemainingYield = 3,
             PestType = PestType.Caterpillar,
@@ -54,6 +57,9 @@ public sealed class PestFeatureFlagTests
             FarmId = farm.Id,
             Unlocked = true,
             SeedId = "corn",
+            PlantedAt = Now.AddHours(-1),
+            CurrentHarvestCycle = 1,
+            CurrentHarvestCycleStartedAt = Now.AddHours(-1),
             ReadyAt = Now.AddMinutes(-30),
             RemainingYield = 3
         };
@@ -283,6 +289,9 @@ public sealed class PestFeatureFlagTests
         Id = Guid.NewGuid(),
         Unlocked = true,
         SeedId = "corn",
+        PlantedAt = Now,
+        CurrentHarvestCycle = 1,
+        CurrentHarvestCycleStartedAt = Now,
         ReadyAt = Now.AddMinutes(5),
         RemainingYield = 3,
         PestStatus = PestStatus.None

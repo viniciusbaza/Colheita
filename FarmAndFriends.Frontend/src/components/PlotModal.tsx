@@ -5,8 +5,10 @@ import { hasFarmExpansion, getLandPurchaseSuccessMessage } from '../land/landPur
 import type { LandPurchaseAttemptStore } from '../land/useLandPurchase'
 import { useFarm } from '../farm/useFarmContext'
 import {
+  confirmedHarvestPatch,
   confirmedPestRemovalPatch,
   confirmedTheftPatch,
+  getHarvestCyclePrecondition,
   getPestRemovalAttempt,
 } from '../farm/farmState'
 import type { PestRemovalAttempt } from '../farm/farmState'
@@ -54,6 +56,64 @@ type PendingAction =
 type Feedback = {
   type: 'success' | 'error'
   message: string
+}
+
+type HarvestCycleProgressProps = {
+  currentCycle: number
+  totalCycles: number
+}
+
+function HarvestCycleProgress({
+  currentCycle,
+  totalCycles,
+}: HarvestCycleProgressProps) {
+  const radius = 10
+  const circumference = 2 * Math.PI * radius
+  const completedPortion = currentCycle / totalCycles
+
+  return (
+    <span
+      role="progressbar"
+      aria-label={`Progresso das colheitas: ${currentCycle} de ${totalCycles}`}
+      aria-valuemin={1}
+      aria-valuemax={totalCycles}
+      aria-valuenow={currentCycle}
+      className="relative inline-flex h-7 w-7 shrink-0 items-center justify-center"
+    >
+      <svg
+        viewBox="0 0 36 36"
+        className="h-7 w-7"
+        aria-hidden="true"
+      >
+        <circle
+          cx="18"
+          cy="18"
+          r={radius}
+          fill="none"
+          strokeWidth="4"
+          className="stroke-emerald-100"
+        />
+        <circle
+          cx="18"
+          cy="18"
+          r={radius}
+          fill="none"
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - completedPortion)}
+          transform="rotate(-90 18 18)"
+          className="stroke-emerald-600 transition-[stroke-dashoffset] duration-300"
+        />
+      </svg>
+      <span
+        aria-hidden="true"
+        className="absolute text-[9px] font-bold tabular-nums text-emerald-800"
+      >
+        {currentCycle}
+      </span>
+    </span>
+  )
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -104,6 +164,9 @@ export function PlotModal({
     ? care?.opportunityId ?? null
     : null
   const seedCatalog = getSeed(plot?.seedId ?? undefined)
+  const currentHarvestCycle = plot?.currentHarvestCycle ?? 1
+  const harvestCycles = seedCatalog?.harvestCycles ?? 1
+  const isRegrowing = currentHarvestCycle > 1
   const repellent = getItem(NATURAL_REPELLENT_ID)
   const repellentQuantity = inventory?.items.find(
     item => item.itemType === 'Item' && item.itemId === NATURAL_REPELLENT_ID,
@@ -248,9 +311,15 @@ export function PlotModal({
     setPendingAction('harvest')
 
     try {
+      const harvestRequest = getHarvestCyclePrecondition(plot)
       const data = await authFetch<HarvestResponse>(
         `/plots/${plotId}/harvest`,
-        { method: 'POST' },
+        {
+          method: 'POST',
+          ...(harvestRequest
+            ? { body: JSON.stringify(harvestRequest) }
+            : {}),
+        },
       )
 
       window.dispatchEvent(
@@ -258,6 +327,7 @@ export function PlotModal({
           detail: { plotId, xpGained: data.xpGained },
         }),
       )
+      patchPlot(plotId, confirmedHarvestPatch(data))
       window.dispatchEvent(new Event('inventory:changed'))
       addXp(data.xpGained)
       await Promise.all([refreshFarm(), refreshInventory()])
@@ -658,7 +728,16 @@ export function PlotModal({
 
       {plot.unlocked && plot.seedId && seedCatalog && (
         <>
-          <p className="mb-2 text-xs">{seedCatalog.icon} {seedCatalog.name}</p>
+          <p className="mb-2 flex items-center gap-1.5 text-sm">
+            <span>{seedCatalog.icon}</span>
+            <span>{seedCatalog.name}</span>
+            {harvestCycles > 1 && (
+              <HarvestCycleProgress
+                currentCycle={currentHarvestCycle}
+                totalCycles={harvestCycles}
+              />
+            )}
+          </p>
           {activePest && (
             <section
               aria-label="Lagarta ativa"
@@ -687,7 +766,7 @@ export function PlotModal({
           {plot.pest?.status === 'consumed' && (
             <p className="mb-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-sm text-orange-800">
               Uma lagarta comeu {plot.pest.consumedAmount ?? 1} {' '}
-              {(seedCatalog?.name ?? 'sua cultura').toLocaleLowerCase('pt-BR')}.
+              {(seedCatalog?.cropName ?? 'sua cultura').toLocaleLowerCase('pt-BR')}.
             </p>
           )}
 
@@ -719,6 +798,16 @@ export function PlotModal({
                 💧 Você regou recentemente. Regue novamente em {careCycleTimeLeft}.
               </p>
             )}
+
+          <div className="mt-2 flex items-center gap-2 text-xs font-semibold text-emerald-700">
+            <p>
+              {plot.isReady
+                ? 'Pronto'
+                : isRegrowing
+                  ? 'Produzindo'
+                  : 'Crescendo'}
+            </p>
+          </div>
 
           <div className="plot-actions">
             {plot.isReady ? (

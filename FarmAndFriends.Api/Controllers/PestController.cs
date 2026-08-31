@@ -113,6 +113,12 @@ public sealed class PestController : ControllerBase
                     PestErrorCodes.OccurrenceMismatch,
                     "Lagarta desatualizada",
                     "Esta lagarta já mudou ou foi resolvida. Atualize o lote e tente novamente."),
+            PestActionFailure.CropCycleStateInvalid =>
+                PestProblem(
+                    StatusCodes.Status500InternalServerError,
+                    PestErrorCodes.CropCycleStateInvalid,
+                    "Estado produtivo do lote inválido",
+                    "O ciclo produtivo persistido está inconsistente. Nenhum item, recompensa ou produção foi alterado."),
             PestActionFailure.AlreadyProtected =>
                 PestProblem(
                     StatusCodes.Status409Conflict,

@@ -125,6 +125,29 @@ public sealed class CropCareRulesTests
     }
 
     [Fact]
+    public void WasGrowingAt_UsesCurrentCycleStartInsteadOfOriginalPlanting()
+    {
+        var plantedAt = Utc(2026, 7, 26, 8);
+        var currentCycleStartedAt = Utc(2026, 7, 26, 10);
+        var opportunityId = Guid.NewGuid();
+        var plot = GrowingPlot(
+            opportunityId,
+            plantedAt,
+            currentCycleStartedAt.AddHours(1));
+        plot.CurrentHarvestCycle = 2;
+        plot.CurrentHarvestCycleStartedAt = currentCycleStartedAt;
+
+        Assert.False(CropCareRules.WasGrowingAt(
+            plot,
+            opportunityId,
+            currentCycleStartedAt.AddTicks(-1)));
+        Assert.True(CropCareRules.WasGrowingAt(
+            plot,
+            opportunityId,
+            currentCycleStartedAt));
+    }
+
+    [Fact]
     public void WasGrowingAt_RejectsLockedPlotWithInconsistentCropState()
     {
         var plantedAt = Utc(2026, 7, 26, 10);
@@ -164,6 +187,8 @@ public sealed class CropCareRulesTests
             Unlocked = true,
             SeedId = "corn",
             PlantedAt = plantedAt,
+            CurrentHarvestCycle = 1,
+            CurrentHarvestCycleStartedAt = plantedAt,
             ReadyAt = readyAt,
             CareOpportunityId = opportunityId
         };

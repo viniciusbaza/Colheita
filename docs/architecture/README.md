@@ -211,6 +211,13 @@ across multiple controllers.
 It must not be reconstructed from theft logs during farm loading or harvest.
 `TheftLog` remains an audit and theft-limit ledger.
 
+Multi-harvest crops reuse that source of truth per production cycle.
+`Seed.HarvestCycles` and nullable `Seed.RegrowTime` configure the lifecycle;
+`Plot.CurrentHarvestCycle` and `CurrentHarvestCycleStartedAt` identify the
+active one-based cycle while preserving the original `PlantedAt`. The pure
+`CropCycleRules` boundary owns initialization, validation, advance and final
+cleanup. No cycle entity or harvest ledger is required.
+
 ## Persistence
 
 Entity Framework Core maps persistent entities to PostgreSQL.
@@ -269,6 +276,27 @@ A contract change must identify:
 * affected consumers.
 
 Prefer additive changes unless a breaking change is explicitly approved.
+
+### Multi-harvest crop contracts
+
+`GET /seeds` returns an explicit catalog DTO. In addition to the existing seed
+fields it exposes `cropName`, `harvestCycles` and nullable `regrowTime`.
+`growTime` and `regrowTime` use the normal .NET `TimeSpan` JSON form.
+
+Farm projections expose nullable `currentHarvestCycle` on every Plot. The
+cycle-start timestamp remains internal because clients need only the cycle,
+its authoritative `readyAt` and the derived `isReady` state.
+
+`POST /plots/{plotId}/harvest` accepts nullable `expectedHarvestCycle`.
+Multi-harvest crops require it to match the locked Plot; missing or stale
+values return HTTP 409 with code `HARVEST_CYCLE_MISMATCH`. Single-harvest crops
+retain the bodyless legacy request. The response adds nullable
+`currentHarvestCycle` and `readyAt`: non-null values identify the next cycle,
+while null values mean the final harvest emptied the Plot.
+
+React applies this confirmed response before reconciliation and emits
+`farm:sync`. `plot:harvest:done` carries only `plotId` and backend-returned XP
+and must never decide whether the crop remains on the Plot.
 
 ## Frontend architecture
 
@@ -386,6 +414,39 @@ Phaser does not determine:
 * final yield;
 * action limits.
 
+### Plot and crop visual composition
+
+Each farm position is composed from independent Phaser objects:
+
+```text
+plot ground -> crop sprite -> transparent input area -> world-space effects
+```
+
+The ground texture represents only locked, empty or planted soil and keeps a
+fixed footprint. The crop sprite is resolved separately from authoritative
+Plot state and owns its display height, vertical ground offset and visual
+stage. This lets a tree be substantially taller than corn without scaling or
+replacing the soil beneath it.
+
+`src/game/cropVisuals.ts` is the presentation-only catalog for crop texture,
+height and ground offset. During the initial cycle it derives planted soil for
+the first quarter, `sprout` from 25% to 50%, and `mature` from 50% until the
+backend confirms readiness. `ready` is shown only from authoritative Plot
+state. Later production cycles reuse the same fruitless `mature` visual until
+they become ready. The transparent input area stays anchored to the Plot
+footprint so a tall canopy does not change which Plot receives a click.
+
+Phaser owns one display-only timer for the 25% and 50% boundaries. It derives
+those instants from `PlantedAt` and `ReadyAt`, refreshes only the world
+presentation, and never emits `farm:sync` or promotes a Plot to ready. The
+existing backend refresh at `ReadyAt` remains authoritative for readiness,
+yield, pests and actions.
+
+A confirmed harvest first creates a short-lived copy of the ready crop for
+feedback. Authoritative state may advance immediately, but Phaser postpones
+materializing the next `mature` sprite until that animation finishes. A final
+harvest leaves the Plot without a crop sprite.
+
 ## React–Phaser communication
 
 React and Phaser communicate through documented events or the established bridge.
@@ -395,7 +456,7 @@ Current event concepts include:
 | Event               | Direction      | Meaning                                  |
 | ------------------- | -------------- | ---------------------------------------- |
 | `plot:click`        | Phaser → React | Player selected a plot                   |
-| `plot:harvest:done` | React → Phaser | Harvest confirmed                        |
+| `plot:harvest:done` | React → Phaser | Confirmed harvest visual feedback        |
 | `plot:steal:done`   | React → Phaser | Theft confirmed                          |
 | `plot:care:done`    | React → Phaser | Plot care confirmed                      |
 | `farm:sync`         | React → Phaser | Authoritative farm state synchronization |
@@ -728,9 +789,9 @@ None
 ```
 
 One status other than `None` is also the one-infestation marker for the current
-planting cycle. `PestOccurrenceId` provides stable correlation for that
-infestation until the next planting resets the pest-cycle fields. Planting
-preserves `ProtectedUntil`.
+production cycle. `PestOccurrenceId` provides stable correlation for that
+infestation until planting or an intermediate harvest resets the pest-cycle
+fields. Both transitions preserve `ProtectedUntil`.
 
 `PestService` captures one UTC time per operation and lazily materializes
 elapsed state while loading a farm or before theft, harvest, removal or

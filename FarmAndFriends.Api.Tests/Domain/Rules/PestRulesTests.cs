@@ -366,6 +366,8 @@ public sealed class PestRulesTests
         Unlocked = true,
         SeedId = "corn",
         PlantedAt = Now.AddMinutes(-30),
+        CurrentHarvestCycle = 1,
+        CurrentHarvestCycleStartedAt = Now.AddMinutes(-30),
         ReadyAt = Now.AddMinutes(-15),
         RemainingYield = remainingYield
     };

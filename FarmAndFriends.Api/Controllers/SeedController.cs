@@ -1,6 +1,7 @@
+using FarmAndFriends.Api.Contracts.Seeds;
+using FarmAndFriends.Api.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using FarmAndFriends.Api.Infrastructure.Data;
 
 namespace FarmAndFriends.Api.Controllers;
 
@@ -19,19 +20,24 @@ public class SeedController : ControllerBase
     public async Task<IActionResult> GetAll()
     {
         var seeds = await _context.Seeds
+            .AsNoTracking()
             .OrderBy(s => s.MinLevel)
+            .ThenBy(s => s.Id)
+            .Select(seed => new SeedCatalogResponse(
+                seed.Id,
+                seed.Name,
+                seed.CropName,
+                seed.Icon,
+                seed.BuyPrice,
+                seed.SellPrice,
+                seed.GrowTime,
+                seed.RegrowTime,
+                seed.TheftChancePercent,
+                seed.MinLevel,
+                seed.CropId,
+                seed.CropAmount,
+                seed.HarvestCycles))
             .ToListAsync();
-
-            var result = seeds.Select(s => new
-            {
-                s.Id,
-                s.Name,
-                s.BuyPrice,
-                s.SellPrice,
-                GrowTimeMinutes = s.GrowTime.TotalMinutes,
-                s.TheftChancePercent,
-                s.MinLevel
-            });
 
         return Ok(seeds);
     }

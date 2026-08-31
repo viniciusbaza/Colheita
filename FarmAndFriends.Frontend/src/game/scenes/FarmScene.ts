@@ -21,14 +21,28 @@ import {
 } from '../farmCamera'
 import { resolveLandOfferPlotId } from '../landOfferVisual'
 import { canReceivePlotInput } from '../plotInput'
-import sproutCarrotImage from '../assets/tiles/sprout/carrot.png'
-import sproutCornImage from '../assets/tiles/sprout/corn.png'
-import sproutPumpkinImage from '../assets/tiles/sprout/pumpkin.png'
-import sproutTomatoImage from '../assets/tiles/sprout/tomato.png'
-import readyCarrotImage from '../assets/tiles/ready/carrot.png'
-import readyCornImage from '../assets/tiles/ready/corn.png'
-import readyPumpkinImage from '../assets/tiles/ready/pumpkin.png'
-import readyTomatoImage from '../assets/tiles/ready/tomato.png'
+import cropSproutCarrotImage from '../assets/crops/sprout/carrot.png'
+import cropSproutCornImage from '../assets/crops/sprout/corn.png'
+import cropSproutPumpkinImage from '../assets/crops/sprout/pumpkin.png'
+import cropSproutTomatoImage from '../assets/crops/sprout/tomato.png'
+import cropSproutAppleTreeImage from '../assets/crops/sprout/apple_tree.png'
+import cropMatureCarrotImage from '../assets/crops/mature/carrot.png'
+import cropMatureCornImage from '../assets/crops/mature/corn.png'
+import cropMaturePumpkinImage from '../assets/crops/mature/pumpkin.png'
+import cropMatureTomatoImage from '../assets/crops/mature/tomato.png'
+import cropMatureAppleTreeImage from '../assets/crops/mature/apple_tree.png'
+import cropReadyCarrotImage from '../assets/crops/ready/carrot.png'
+import cropReadyCornImage from '../assets/crops/ready/corn.png'
+import cropReadyPumpkinImage from '../assets/crops/ready/pumpkin.png'
+import cropReadyTomatoImage from '../assets/crops/ready/tomato.png'
+import cropReadyAppleTreeImage from '../assets/crops/ready/apple_tree.png'
+import {
+  MAX_CROP_DISPLAY_HEIGHT,
+  MAX_CROP_GROUND_OFFSET,
+  getNextCropVisualTransitionAt,
+  resolvePlotVisual,
+  type ResolvedCropVisual,
+} from '../cropVisuals'
 import type {
   Farm,
   PestStatus,
@@ -42,12 +56,19 @@ import type {
 
 type XpSource = 'HARVEST' | 'PLANT' | 'STEAL' | 'CARE' | 'PEST_REMOVE'
 
-const GROWTH_STAGE_2_THRESHOLD = 0.5
 const PLOT_SCALE = 0.11
 const ENVIRONMENT_SCALE = 0.42
 const CAMERA_DRAG_THRESHOLD = 8
 const LAND_OFFER_SIGN_WIDTH = FARM_TILE_WIDTH * 0.55
 const LAND_OFFER_SIGN_GROUND_OFFSET = FARM_TILE_HEIGHT * 0.1
+const PLOT_DEPTH_STRIDE = 10
+const PLOT_GROUND_DEPTH_OFFSET = 0
+const PLOT_CROP_DEPTH_OFFSET = 2
+const PLOT_INPUT_DEPTH_OFFSET = 4
+const CROP_CANOPY_OVERHANG = Math.max(
+  0,
+  MAX_CROP_DISPLAY_HEIGHT + MAX_CROP_GROUND_OFFSET - FARM_TILE_HEIGHT,
+)
 
 const DEPTH = {
   BACKDROP: -1_000,
@@ -58,31 +79,29 @@ const DEPTH = {
   FEEDBACK: 999,
 } as const
 
-const SPROUT_TEXTURES: Record<string, string> = {
-  corn: 'sprout-corn',
-  carrot: 'sprout-carrot',
-  pumpkin: 'sprout-pumpkin',
-  tomato: 'sprout-tomato',
+type PlotVisual = {
+  ground: Phaser.GameObjects.Image
+  crop: Phaser.GameObjects.Image | null
+  hitArea: Phaser.GameObjects.Zone
 }
 
-const READY_TEXTURES: Record<string, string> = {
-  corn: 'ready-corn',
-  carrot: 'ready-carrot',
-  pumpkin: 'ready-pumpkin',
-  tomato: 'ready-tomato',
+type HarvestVisualTransition = {
+  animationCrop: Phaser.GameObjects.Image
+  tween: Phaser.Tweens.Tween | null
+  sourceCropStateKey: string
+  animationFinished: boolean
+  nextStateObserved: boolean
 }
 
-function getGrowthProgress(plot: Plot): number {
-  if (!plot.plantedAt || !plot.readyAt) return 0
+function getCropStateKey(plot: Plot | undefined) {
+  if (!plot) return 'missing'
 
-  const planted = new Date(plot.plantedAt).getTime()
-  const ready = new Date(plot.readyAt).getTime()
-  const now = Date.now()
-
-  const total = ready - planted
-  const elapsed = now - planted
-
-  return Math.min(Math.max(elapsed / total, 0), 1)
+  return [
+    plot.seedId ?? 'empty',
+    plot.currentHarvestCycle ?? 'no-cycle',
+    plot.isReady ? 'ready' : 'not-ready',
+    plot.readyAt ?? 'no-deadline',
+  ].join('|')
 }
 
 function isPlotProtected(plot: Plot): boolean {
@@ -96,8 +115,11 @@ export default class FarmScene extends Phaser.Scene {
   private isVisiting = false
   private environment?: Phaser.GameObjects.Image
   private modalBlockers = new Set<string>()
-  private plotTiles = new Map<string, Phaser.GameObjects.Image>()
+  private plotVisuals = new Map<string, PlotVisual>()
+  private harvestVisualTransitions = new Map<string, HarvestVisualTransition>()
+  private cropVisualTransitionTimer: Phaser.Time.TimerEvent | null = null
   private plotBounds = new Phaser.Geom.Rectangle()
+  private plotVisualBounds = new Phaser.Geom.Rectangle()
   private cameraContentBounds = new Phaser.Geom.Rectangle()
   private cameraMode: FarmCameraMode = 'focus'
   private overviewZoom = 1
@@ -134,18 +156,27 @@ export default class FarmScene extends Phaser.Scene {
     this.load.image('plot-glow', plotGlowImage)
     this.load.image('plot-growing', plotGrowingImage)
     this.load.image('land-for-sale-sign', landForSaleSignImage)
-    this.load.image('sprout-carrot', sproutCarrotImage)
-    this.load.image('ready-carrot', readyCarrotImage)
-    this.load.image('sprout-corn', sproutCornImage)
-    this.load.image('ready-corn', readyCornImage)
-    this.load.image('sprout-pumpkin', sproutPumpkinImage)
-    this.load.image('ready-pumpkin', readyPumpkinImage)
-    this.load.image('sprout-tomato', sproutTomatoImage)
-    this.load.image('ready-tomato', readyTomatoImage)
+    this.load.image('crop-sprout-carrot', cropSproutCarrotImage)
+    this.load.image('crop-mature-carrot', cropMatureCarrotImage)
+    this.load.image('crop-ready-carrot', cropReadyCarrotImage)
+    this.load.image('crop-sprout-corn', cropSproutCornImage)
+    this.load.image('crop-mature-corn', cropMatureCornImage)
+    this.load.image('crop-ready-corn', cropReadyCornImage)
+    this.load.image('crop-sprout-pumpkin', cropSproutPumpkinImage)
+    this.load.image('crop-mature-pumpkin', cropMaturePumpkinImage)
+    this.load.image('crop-ready-pumpkin', cropReadyPumpkinImage)
+    this.load.image('crop-sprout-tomato', cropSproutTomatoImage)
+    this.load.image('crop-mature-tomato', cropMatureTomatoImage)
+    this.load.image('crop-ready-tomato', cropReadyTomatoImage)
+    this.load.image('crop-sprout-apple-tree', cropSproutAppleTreeImage)
+    this.load.image('crop-mature-apple-tree', cropMatureAppleTreeImage)
+    this.load.image('crop-ready-apple-tree', cropReadyAppleTreeImage)
   }
 
   create() {
-    this.plotTiles.clear()
+    this.clearCropVisualTransitionTimer()
+    this.plotVisuals.clear()
+    this.harvestVisualTransitions.clear()
     this.modalBlockers.clear()
     this.cameraMode =
       this.registry.get('farmCameraMode') === 'overview'
@@ -160,6 +191,12 @@ export default class FarmScene extends Phaser.Scene {
       plotLayout.bounds.width,
       plotLayout.bounds.height,
     )
+    this.plotVisualBounds.setTo(
+      plotLayout.bounds.left,
+      plotLayout.bounds.top - CROP_CANOPY_OVERHANG,
+      plotLayout.bounds.width,
+      plotLayout.bounds.height + CROP_CANOPY_OVERHANG,
+    )
 
     this.cameras.main.setBackgroundColor('#dff5ff')
     this.createBackdrop()
@@ -171,11 +208,12 @@ export default class FarmScene extends Phaser.Scene {
       )
       .setDepth(DEPTH.ENVIRONMENT)
 
-    this.updateCameraContentBounds()
-
     for (const plot of this.farm.plots) {
       this.createPlot(plot, plotLayout.originX, plotLayout.originY)
     }
+    this.scheduleNextCropVisualTransition()
+
+    this.updateCameraContentBounds()
 
     this.syncLandOfferSign()
 
@@ -246,7 +284,9 @@ export default class FarmScene extends Phaser.Scene {
       this.events.off(Phaser.Scenes.Events.DESTROY, this.onSceneDestroy)
       this.removeLandOfferSign()
       this.cleanupPestVisuals()
-      this.plotTiles.clear()
+      this.cleanupHarvestVisualTransitions()
+      this.clearCropVisualTransitionTimer()
+      this.plotVisuals.clear()
       this.cancelPan()
       this.stopCameraMotion()
       this.game.canvas.style.cursor = 'default'
@@ -327,10 +367,10 @@ export default class FarmScene extends Phaser.Scene {
     if (!environment) return
 
     const environmentBounds = environment.getBounds()
-    const left = Math.min(environmentBounds.left, this.plotBounds.left)
-    const top = Math.min(environmentBounds.top, this.plotBounds.top)
-    const right = Math.max(environmentBounds.right, this.plotBounds.right)
-    const bottom = Math.max(environmentBounds.bottom, this.plotBounds.bottom)
+    const left = Math.min(environmentBounds.left, this.plotVisualBounds.left)
+    const top = Math.min(environmentBounds.top, this.plotVisualBounds.top)
+    const right = Math.max(environmentBounds.right, this.plotVisualBounds.right)
+    const bottom = Math.max(environmentBounds.bottom, this.plotVisualBounds.bottom)
 
     this.cameraContentBounds.setTo(
       left,
@@ -354,9 +394,9 @@ export default class FarmScene extends Phaser.Scene {
     this.hudSafeArea = compactLayout ? 86 : 96
 
     if (isPortrait) {
-      const fitWidth = (width - 24) / this.plotBounds.width
+      const fitWidth = (width - 24) / this.plotVisualBounds.width
       const fitHeight =
-        (height - this.hudSafeArea - 24) / this.plotBounds.height
+        (height - this.hudSafeArea - 24) / this.plotVisualBounds.height
 
       // O 3x3 fica mais próximo no celular. Grades maiores ainda cabem por
       // inteiro na visão geral, sem assumir um número fixo de linhas/colunas.
@@ -403,8 +443,8 @@ export default class FarmScene extends Phaser.Scene {
 
   private getHomeCameraCenter(zoom: number) {
     return new Phaser.Math.Vector2(
-      this.plotBounds.centerX,
-      this.plotBounds.centerY - this.hudSafeArea / (2 * zoom),
+      this.plotVisualBounds.centerX,
+      this.plotVisualBounds.centerY - this.hudSafeArea / (2 * zoom),
     )
   }
 
@@ -612,55 +652,63 @@ export default class FarmScene extends Phaser.Scene {
       FARM_TILE_HEIGHT,
     )
 
-    const texture = this.getPlotTexture(plot)
-
-    const tile = this.add
-      .image(originX + isoX, originY + isoY, texture)
+    const x = originX + isoX
+    const y = originY + isoY
+    const groundDepth = this.getPlotDepth(
+      plot.x,
+      plot.y,
+      PLOT_GROUND_DEPTH_OFFSET,
+    )
+    const resolvedVisual = resolvePlotVisual(plot, Date.now())
+    const ground = this.add
+      .image(x, y, resolvedVisual.groundTexture)
       .setOrigin(0.5, 1)
       .setScale(PLOT_SCALE)
-      .setDepth(DEPTH.PLOTS + plot.x + plot.y)
+      .setDepth(groundDepth)
 
-    const ground = this.add.zone(
-      originX + isoX,
-      originY + isoY,
+    const hitArea = this.add.zone(
+      x,
+      y,
       FARM_TILE_WIDTH,
       FARM_TILE_HEIGHT,
     )
 
-    ground
+    hitArea
       .setOrigin(0.5, 1)
-      .setDepth(DEPTH.PLOTS + plot.x + plot.y)
+      .setDepth(this.getPlotDepth(plot.x, plot.y, PLOT_INPUT_DEPTH_OFFSET))
 
-    tile.setData('plotId', plot.id)
-    tile.setData('gridX', plot.x)
-    tile.setData('gridY', plot.y)
-    tile.setData(
+    ground.setData('plotId', plot.id)
+    ground.setData('gridX', plot.x)
+    ground.setData('gridY', plot.y)
+    ground.setData(
       'receivesPlotInput',
       canReceivePlotInput(plot, this.isVisiting),
     )
 
-    this.plotTiles.set(plot.id, tile)
-    tile.setData('lastRemainingYield', plot.remainingYield)
-    tile.setData('lastPestStatus', plot.pest?.status ?? null)
+    const visual: PlotVisual = { ground, crop: null, hitArea }
+    this.plotVisuals.set(plot.id, visual)
+    this.syncCropVisual(visual, resolvedVisual.crop)
+    ground.setData('lastRemainingYield', plot.remainingYield)
+    ground.setData('lastPestStatus', plot.pest?.status ?? null)
 
     // 🌟 Efeitos para plots ready
     if (plot.seedId && plot.isReady) {
-      this.addReadyPulse(tile)
-      this.addGlowEffect(tile)
+      this.addReadyPulse(visual)
+      this.addGlowEffect(visual)
       if (
         typeof plot.remainingYield === 'number'
         && plot.remainingYield > 0
       ) {
-        this.addRemainingYieldBadge(tile, plot.remainingYield)
+        this.addRemainingYieldBadge(visual, plot.remainingYield)
       }
     }
 
-    this.syncCareBadge(tile, plot, false)
-    this.syncPestVisual(tile, plot, false)
+    this.syncCareBadge(visual, plot, false)
+    this.syncPestVisual(visual, plot, false)
 
     if (!canReceivePlotInput(plot, this.isVisiting)) return
 
-    ground.setInteractive(
+    hitArea.setInteractive(
       new Phaser.Geom.Polygon([
         FARM_TILE_WIDTH / 2, 0,
         FARM_TILE_WIDTH, FARM_TILE_HEIGHT / 2,
@@ -673,7 +721,7 @@ export default class FarmScene extends Phaser.Scene {
     // Abre somente em tap/click. Um arrasto iniciado sobre o plot move a
     // câmera sem abrir o modal acidentalmente. Visitantes não registram este
     // handler nos lotes bloqueados, mas o pan global continua disponível.
-    ground.on('pointerup', () => {
+    hitArea.on('pointerup', () => {
       if (
         this.panMoved ||
         this.time.now < this.suppressPlotClickUntil ||
@@ -686,8 +734,8 @@ export default class FarmScene extends Phaser.Scene {
 
       const cam = this.cameras.main
 
-      const screenX = cam.x + (tile.x - cam.worldView.x) * cam.zoom
-      const anchorWorldY = tile.y - tile.displayHeight * 0.78
+      const screenX = cam.x + (ground.x - cam.worldView.x) * cam.zoom
+      const anchorWorldY = this.getCropAnchorY(visual, 0.78)
       const screenY = cam.y + (anchorWorldY - cam.worldView.y) * cam.zoom
       
       window.dispatchEvent(
@@ -702,12 +750,124 @@ export default class FarmScene extends Phaser.Scene {
     })
   }
 
-  private addGlowEffect(tile: Phaser.GameObjects.Image) {
-    const glow = this.add.image(tile.x, tile.y, 'plot-glow')
+  private getPlotDepth(gridX: number, gridY: number, offset: number) {
+    return DEPTH.PLOTS
+      + (gridX + gridY) * PLOT_DEPTH_STRIDE
+      + gridX * 0.01
+      + offset
+  }
+
+  private syncCropVisual(
+    visual: PlotVisual,
+    resolved: ResolvedCropVisual | null,
+  ) {
+    const current = visual.crop
+
+    if (!resolved) {
+      if (current) {
+        this.tweens.killTweensOf(current)
+        current.destroy()
+        visual.crop = null
+      }
+      return
+    }
+
+    const textureChanged = current?.texture.key !== resolved.texture
+    if (current && !textureChanged) {
+      if (
+        current.getData('visualDisplayHeight') !== resolved.displayHeight ||
+        current.getData('visualGroundOffsetX') !== resolved.groundOffsetX ||
+        current.getData('visualGroundOffsetY') !== resolved.groundOffsetY
+      ) {
+        this.applyCropLayout(current, visual.ground, resolved)
+      }
+      return
+    }
+
+    if (current) {
+      this.tweens.killTweensOf(current)
+      current.destroy()
+    }
+
+    const crop = this.add
+      .image(visual.ground.x, visual.ground.y, resolved.texture)
       .setOrigin(0.5, 1)
-      .setScale(tile.scale)
+
+    this.applyCropLayout(crop, visual.ground, resolved)
+    visual.crop = crop
+  }
+
+  private applyCropLayout(
+    crop: Phaser.GameObjects.Image,
+    ground: Phaser.GameObjects.Image,
+    resolved: ResolvedCropVisual,
+  ) {
+    const displayWidth = crop.height > 0
+      ? crop.width * (resolved.displayHeight / crop.height)
+      : resolved.displayHeight
+
+    crop
+      .setPosition(
+        ground.x + resolved.groundOffsetX,
+        ground.y - resolved.groundOffsetY,
+      )
+      .setDisplaySize(displayWidth, resolved.displayHeight)
+      .setDepth(
+        this.getPlotDepth(
+          ground.getData('gridX') as number,
+          ground.getData('gridY') as number,
+          PLOT_CROP_DEPTH_OFFSET,
+        ),
+      )
+
+    crop.setData('baseScaleX', crop.scaleX)
+    crop.setData('baseScaleY', crop.scaleY)
+    crop.setData('visualStage', resolved.stage)
+    crop.setData('visualDisplayHeight', resolved.displayHeight)
+    crop.setData('visualGroundOffsetX', resolved.groundOffsetX)
+    crop.setData('visualGroundOffsetY', resolved.groundOffsetY)
+  }
+
+  private hasCropVisualChanged(
+    visual: PlotVisual,
+    resolved: ResolvedCropVisual | null,
+  ) {
+    const current = visual.crop
+
+    if (!current || !resolved) {
+      return (current?.texture.key ?? null) !== (resolved?.texture ?? null)
+    }
+
+    return current.texture.key !== resolved.texture
+      || current.getData('visualDisplayHeight') !== resolved.displayHeight
+      || current.getData('visualGroundOffsetX') !== resolved.groundOffsetX
+      || current.getData('visualGroundOffsetY') !== resolved.groundOffsetY
+  }
+
+  private restoreCropAppearance(crop: Phaser.GameObjects.Image | null) {
+    if (!crop?.scene) return
+
+    crop
+      .setScale(
+        (crop.getData('baseScaleX') as number | undefined) ?? crop.scaleX,
+        (crop.getData('baseScaleY') as number | undefined) ?? crop.scaleY,
+      )
       .setAlpha(1)
-      .setDepth(tile.depth - 1)
+      .clearTint()
+  }
+
+  private getCropAnchorY(visual: PlotVisual, heightFactor = 1) {
+    const target = visual.crop ?? visual.ground
+    return target.y - target.displayHeight * heightFactor
+  }
+
+  private addGlowEffect(visual: PlotVisual) {
+    const { ground } = visual
+    const glow = this.add.image(ground.x, ground.y, 'plot-glow')
+      .setOrigin(0.5, 1)
+      .setScale(ground.scale)
+      .setAlpha(1)
+      .setDepth(ground.depth - 1)
 
     this.tweens.add({
       targets: glow,
@@ -718,26 +878,66 @@ export default class FarmScene extends Phaser.Scene {
       repeat: -1,
     })
 
-    tile.setData('glow', glow)
+    ground.setData('glow', glow)
   }
 
-  private addReadyPulse(tile: Phaser.GameObjects.Image) {
-    this.tweens.add({
-      targets: tile,
-      scale: tile.scale * 1.03,
+  private addReadyPulse(visual: PlotVisual) {
+    const crop = visual.crop
+    if (!crop) return
+
+    const baseScaleX = crop.scaleX
+    const baseScaleY = crop.scaleY
+    const pulse = this.tweens.add({
+      targets: crop,
+      scaleX: baseScaleX * 1.03,
+      scaleY: baseScaleY * 1.03,
       duration: 900,
       ease: 'Sine.easeInOut',
       yoyo: true,
       repeat: -1,
     })
+
+    visual.ground.setData('readyPulseTween', pulse)
+  }
+
+  private removeReadyEffects(visual: PlotVisual) {
+    const { ground, crop } = visual
+    const glow = ground.getData('glow') as
+      | Phaser.GameObjects.Image
+      | null
+      | undefined
+    const readyPulse = ground.getData('readyPulseTween') as
+      | Phaser.Tweens.Tween
+      | null
+      | undefined
+    const harvestTween = ground.getData('harvestTween') as
+      | Phaser.Tweens.Tween
+      | null
+      | undefined
+
+    if (glow) {
+      this.tweens.killTweensOf(glow)
+      glow.destroy()
+    }
+
+    readyPulse?.stop()
+    ground.setData('glow', null)
+    ground.setData('readyPulseTween', null)
+
+    if (!harvestTween?.isPlaying()) {
+      this.restoreCropAppearance(crop)
+    }
+
+    this.removeRemainingYieldBadge(visual)
   }
 
   private addRemainingYieldBadge(
-    tile: Phaser.GameObjects.Image,
+    visual: PlotVisual,
     remainingYield: number,
     animate = true,
   ) {
-    const badge = this.add.container(tile.x + 5, tile.y - 5)
+    const { ground } = visual
+    const badge = this.add.container(ground.x + 5, ground.y - 5)
 
     // sombra
     const shadow = this.add.graphics()
@@ -758,7 +958,7 @@ export default class FarmScene extends Phaser.Scene {
     badge.add([shadow, bg, text])
 
     badge
-      .setDepth(DEPTH.BADGES + tile.depth)
+      .setDepth(DEPTH.BADGES + ground.depth)
       .setScale(animate && !this.reduceMotion ? 0 : 1)
 
     // animação de entrada
@@ -771,14 +971,14 @@ export default class FarmScene extends Phaser.Scene {
       })
     }
 
-    tile.setData('yieldBadge', {
+    ground.setData('yieldBadge', {
       container: badge,
       text
     })
   }
 
-  private removeRemainingYieldBadge(tile: Phaser.GameObjects.Image) {
-    const data = tile.getData('yieldBadge') as {
+  private removeRemainingYieldBadge(visual: PlotVisual) {
+    const data = visual.ground.getData('yieldBadge') as {
       container: Phaser.GameObjects.Container,
       text: Phaser.GameObjects.BitmapText
     }
@@ -796,14 +996,14 @@ export default class FarmScene extends Phaser.Scene {
       onComplete: () => container.destroy()
     })
 
-    tile.setData('yieldBadge', null)
+    visual.ground.setData('yieldBadge', null)
   }
 
   private setRemainingYieldBadgeValue(
-    tile: Phaser.GameObjects.Image,
+    visual: PlotVisual,
     remainingYield: number,
   ) {
-    const data = tile.getData('yieldBadge') as {
+    const data = visual.ground.getData('yieldBadge') as {
       container: Phaser.GameObjects.Container
       text: Phaser.GameObjects.BitmapText
     }
@@ -817,11 +1017,11 @@ export default class FarmScene extends Phaser.Scene {
   }
 
   private updateRemainingYieldBadge(
-    tile: Phaser.GameObjects.Image,
+    visual: PlotVisual,
     remainingYield: number,
     feedbackTint = 0xff5555,
   ) {
-    const data = tile.getData('yieldBadge') as {
+    const data = visual.ground.getData('yieldBadge') as {
       container: Phaser.GameObjects.Container
       text: Phaser.GameObjects.BitmapText
     }
@@ -831,7 +1031,7 @@ export default class FarmScene extends Phaser.Scene {
     const { container, text } = data
     if (!text || !container) return
 
-    this.setRemainingYieldBadgeValue(tile, remainingYield)
+    this.setRemainingYieldBadgeValue(visual, remainingYield)
 
     if (!this.reduceMotion) {
       this.tweens.add({
@@ -852,7 +1052,7 @@ export default class FarmScene extends Phaser.Scene {
   }
 
   private syncPestVisual(
-    tile: Phaser.GameObjects.Image,
+    visual: PlotVisual,
     plot: Plot,
     animate = true,
   ) {
@@ -863,31 +1063,33 @@ export default class FarmScene extends Phaser.Scene {
       Boolean(plot.seedId) &&
       plot.isReady &&
       !isPlotProtected(plot)
-    const current = tile.getData('pestVisual') as
+    const current = visual.ground.getData('pestVisual') as
       | Phaser.GameObjects.Text
       | undefined
 
     if (!shouldShow) {
-      this.removePestVisual(tile)
+      this.removePestVisual(visual)
       return
     }
 
     if (current?.scene) return
 
-    this.addCaterpillarVisual(tile, animate)
+    this.addCaterpillarVisual(visual, animate)
   }
 
   private addCaterpillarVisual(
-    tile: Phaser.GameObjects.Image,
+    visual: PlotVisual,
     animate = true,
   ) {
-    this.removePestVisual(tile)
+    this.removePestVisual(visual)
+    const crop = visual.crop
+    if (!crop) return
 
     // Emoji glyphs are vendor-rendered. Keeping the conventional left-facing
     // caterpillar on the crop's right side makes its head point to the plant.
     const caterpillar = this.add.text(
-      tile.x + tile.displayWidth * 0.25,
-      tile.y - tile.displayHeight * 0.62,
+      crop.x + crop.displayWidth * 0.25,
+      crop.y - crop.displayHeight * 0.62,
       '🐛',
       {
         fontFamily:
@@ -905,10 +1107,10 @@ export default class FarmScene extends Phaser.Scene {
       },
     )
       .setOrigin(0.5)
-      .setDepth(DEPTH.BADGES + tile.depth + 2)
+      .setDepth(DEPTH.BADGES + crop.depth + 2)
       .setScale(animate && !this.reduceMotion ? 0 : 1)
 
-    tile.setData('pestVisual', caterpillar)
+    visual.ground.setData('pestVisual', caterpillar)
 
     if (animate && !this.reduceMotion) {
       this.tweens.add({
@@ -932,8 +1134,8 @@ export default class FarmScene extends Phaser.Scene {
     }
   }
 
-  private removePestVisual(tile: Phaser.GameObjects.Image) {
-    const caterpillar = tile.getData('pestVisual') as
+  private removePestVisual(visual: PlotVisual) {
+    const caterpillar = visual.ground.getData('pestVisual') as
       | Phaser.GameObjects.Text
       | undefined
 
@@ -942,18 +1144,18 @@ export default class FarmScene extends Phaser.Scene {
       caterpillar.destroy()
     }
 
-    tile.setData('pestVisual', null)
+    visual.ground.setData('pestVisual', null)
   }
 
   private spawnPestConsumptionFeedback(
-    tile: Phaser.GameObjects.Image,
+    visual: PlotVisual,
     consumedAmount: number | null,
   ) {
     const message = consumedAmount && consumedAmount > 0
       ? `🐛 Lagarta comeu ${consumedAmount}`
       : '🐛 Dano de lagarta'
-    const y = tile.y - tile.displayHeight * 0.92
-    const text = this.add.text(tile.x, y, message, {
+    const y = this.getCropAnchorY(visual, 0.92)
+    const text = this.add.text(visual.ground.x, y, message, {
       fontFamily: 'Arial, sans-serif',
       fontSize: '12px',
       fontStyle: 'bold',
@@ -974,9 +1176,9 @@ export default class FarmScene extends Phaser.Scene {
     })
   }
 
-  private spawnPestTheftFeedback(tile: Phaser.GameObjects.Image) {
-    const y = tile.y - tile.displayHeight - 10
-    const text = this.add.text(tile.x, y, '🐛 Lagarta espantada!', {
+  private spawnPestTheftFeedback(visual: PlotVisual) {
+    const y = this.getCropAnchorY(visual) - 10
+    const text = this.add.text(visual.ground.x, y, '🐛 Lagarta espantada!', {
       fontFamily: 'Arial, sans-serif',
       fontSize: '12px',
       fontStyle: 'bold',
@@ -998,37 +1200,38 @@ export default class FarmScene extends Phaser.Scene {
   }
 
   private cleanupPestVisuals() {
-    for (const tile of this.plotTiles.values()) {
-      this.removePestVisual(tile)
+    for (const visual of this.plotVisuals.values()) {
+      this.removePestVisual(visual)
     }
   }
 
   private syncCareBadge(
-    tile: Phaser.GameObjects.Image,
+    visual: PlotVisual,
     plot: Plot,
     animate = true,
   ) {
     const nextStatus = plot.care?.canCare && plot.care?.rewardAvailable === true ? 'available' : null
-    const currentStatus = tile.getData('careBadgeStatus') as
+    const currentStatus = visual.ground.getData('careBadgeStatus') as
       | 'available'
       | null
 
     if (currentStatus === nextStatus) return
 
-    this.removeCareBadge(tile)
+    this.removeCareBadge(visual)
 
     if (nextStatus === 'available') {
-      this.addAvailableCareBadge(tile, animate)
+      this.addAvailableCareBadge(visual, animate)
     }
   }
 
   private addAvailableCareBadge(
-    tile: Phaser.GameObjects.Image,
+    visual: PlotVisual,
     animate = true,
   ) {
+    const { ground } = visual
     const badge = this.add.container(
-      tile.x - 17,
-      tile.y - tile.displayHeight * 0.72,
+      ground.x - 17,
+      this.getCropAnchorY(visual, 0.72),
     )
     const shadow = this.add.circle(1, 2, 7, 0x082f49, 0.2)
     const background = this.add.circle(0, 0, 6.5, 0xe0f2fe, 0.96)
@@ -1042,11 +1245,11 @@ export default class FarmScene extends Phaser.Scene {
 
     badge
       .add([shadow, background, drop])
-      .setDepth(DEPTH.BADGES + tile.depth)
+      .setDepth(DEPTH.BADGES + ground.depth)
       .setScale(animate && !this.reduceMotion ? 0 : 1)
 
-    tile.setData('careBadge', badge)
-    tile.setData('careBadgeStatus', 'available')
+    ground.setData('careBadge', badge)
+    ground.setData('careBadgeStatus', 'available')
 
     if (animate && !this.reduceMotion) {
       this.tweens.add({
@@ -1069,8 +1272,8 @@ export default class FarmScene extends Phaser.Scene {
     }
   }
 
-  private removeCareBadge(tile: Phaser.GameObjects.Image) {
-    const badge = tile.getData('careBadge') as
+  private removeCareBadge(visual: PlotVisual) {
+    const badge = visual.ground.getData('careBadge') as
       | Phaser.GameObjects.Container
       | undefined
 
@@ -1079,28 +1282,8 @@ export default class FarmScene extends Phaser.Scene {
       badge.destroy(true)
     }
 
-    tile.setData('careBadge', null)
-    tile.setData('careBadgeStatus', null)
-  }
-
-  private getPlotTexture(plot: Plot) {
-
-    if (!plot.unlocked) return 'plot-locked'
-    
-    if (plot.seedId && plot.isReady) {
-    return READY_TEXTURES[plot.seedId] ?? 'plot-growing'
-    }
-
-    if (plot.seedId) {
-      const progress = getGrowthProgress(plot)
-
-      if (progress >= GROWTH_STAGE_2_THRESHOLD) {
-      return SPROUT_TEXTURES[plot.seedId] ?? 'plot-growing'
-      }
-
-      return 'plot-growing'
-    }
-    return 'plot'
+    visual.ground.setData('careBadge', null)
+    visual.ground.setData('careBadgeStatus', null)
   }
 
   private syncLandOfferSign() {
@@ -1116,9 +1299,9 @@ export default class FarmScene extends Phaser.Scene {
       return
     }
 
-    const tile = this.plotTiles.get(plotId)
+    const visual = this.plotVisuals.get(plotId)
 
-    if (!tile) {
+    if (!visual) {
       this.removeLandOfferSign()
       return
     }
@@ -1134,13 +1317,13 @@ export default class FarmScene extends Phaser.Scene {
 
     const sign = this.add
       .image(
-        tile.x,
-        tile.y - LAND_OFFER_SIGN_GROUND_OFFSET,
+        visual.ground.x,
+        visual.ground.y - LAND_OFFER_SIGN_GROUND_OFFSET,
         'land-for-sale-sign',
       )
       .setName('land-offer-sign')
       .setOrigin(0.5, 1)
-      .setDepth(tile.depth + 0.5)
+      .setDepth(visual.ground.depth + 0.5)
 
     sign.setScale(LAND_OFFER_SIGN_WIDTH / sign.width)
 
@@ -1163,6 +1346,8 @@ export default class FarmScene extends Phaser.Scene {
 
   private onSceneDestroy = () => {
     this.removeLandOfferSign()
+    this.cleanupHarvestVisualTransitions()
+    this.clearCropVisualTransitionTimer()
   }
 
   private onModalToggle = (e: Event) => {
@@ -1186,15 +1371,16 @@ export default class FarmScene extends Phaser.Scene {
     this.farm = farm
 
     const topologyChanged =
-      farm.plots.length !== this.plotTiles.size ||
+      farm.plots.length !== this.plotVisuals.size ||
       farm.plots.some(plot => {
-        const tile = this.plotTiles.get(plot.id)
+        const visual = this.plotVisuals.get(plot.id)
+        const ground = visual?.ground
 
         return (
-          !tile ||
-          tile.getData('gridX') !== plot.x ||
-          tile.getData('gridY') !== plot.y ||
-          tile.getData('receivesPlotInput') !== canReceivePlotInput(
+          !ground ||
+          ground.getData('gridX') !== plot.x ||
+          ground.getData('gridY') !== plot.y ||
+          ground.getData('receivesPlotInput') !== canReceivePlotInput(
             plot,
             this.isVisiting,
           )
@@ -1204,6 +1390,7 @@ export default class FarmScene extends Phaser.Scene {
     if (topologyChanged) {
       // Compras futuras podem adicionar plots ou ampliar a matriz. Reiniciar
       // reconstrói tiles, hit areas, bounds e enquadramento de forma atômica.
+      this.clearCropVisualTransitionTimer()
       this.scene.restart({ farm, isVisiting: this.isVisiting })
       return
     }
@@ -1211,149 +1398,327 @@ export default class FarmScene extends Phaser.Scene {
     this.syncLandOfferSign()
 
     // Atualiza cada plot
+    const visualNow = Date.now()
     for (const plot of farm.plots) {
-      const tile = this.plotTiles.get(plot.id)
-      if (!tile) continue
+      const visual = this.plotVisuals.get(plot.id)
+      if (!visual) continue
+      const transition = this.harvestVisualTransitions.get(plot.id)
 
-      const pest = plot.pest
-      const previousRemainingYield = tile.getData('lastRemainingYield') as
-        | number
-        | null
-        | undefined
-      const previousPestStatus = tile.getData('lastPestStatus') as
-        | PestStatus
-        | null
-        | undefined
-      const pestConsumedWithReduction =
-        previousPestStatus !== 'consumed' &&
-        pest?.status === 'consumed' &&
-        typeof previousRemainingYield === 'number' &&
-        typeof plot.remainingYield === 'number' &&
-        plot.remainingYield < previousRemainingYield
-      const newTexture = this.getPlotTexture(plot)
-
-      if (tile.texture.key !== newTexture) {
-        tile.setTexture(newTexture)
+      if (
+        transition
+        && getCropStateKey(plot) !== transition.sourceCropStateKey
+      ) {
+        transition.nextStateObserved = true
       }
 
-      this.syncCareBadge(tile, plot)
+      const canReleaseTransition = Boolean(
+        transition?.animationFinished && transition.nextStateObserved,
+      )
+      if (canReleaseTransition) {
+        this.releaseHarvestVisualTransition(plot.id)
+      }
 
-      // 🌟 ready → adiciona efeitos
-      if (plot.seedId && plot.isReady) {
-        if (!tile.getData('glow')) {
-          this.addReadyPulse(tile)
-          this.addGlowEffect(tile)
+      this.syncPlotVisualState(
+        plot,
+        visual,
+        visualNow,
+        !transition || canReleaseTransition,
+      )
+    }
+
+    this.scheduleNextCropVisualTransition()
+  }
+
+  private scheduleNextCropVisualTransition() {
+    this.clearCropVisualTransitionTimer()
+
+    const now = Date.now()
+    let nextTransitionAt: number | null = null
+
+    for (const plot of this.farm.plots) {
+      const candidate = getNextCropVisualTransitionAt(plot, now)
+      if (
+        candidate !== null
+        && (nextTransitionAt === null || candidate < nextTransitionAt)
+      ) {
+        nextTransitionAt = candidate
+      }
+    }
+
+    if (nextTransitionAt === null) return
+
+    this.cropVisualTransitionTimer = this.time.delayedCall(
+      Math.max(0, nextTransitionAt - now),
+      this.onCropVisualTransition,
+    )
+  }
+
+  private clearCropVisualTransitionTimer() {
+    this.cropVisualTransitionTimer?.remove(false)
+    this.cropVisualTransitionTimer = null
+  }
+
+  private onCropVisualTransition = () => {
+    this.cropVisualTransitionTimer = null
+    const visualNow = Date.now()
+
+    // Atualiza somente a apresentação derivada do snapshot mais recente. O
+    // timer nunca altera `isReady` nem emite farm:sync; a prontidão continua
+    // dependendo da próxima confirmação autoritativa do backend.
+    for (const plot of this.farm.plots) {
+      const visual = this.plotVisuals.get(plot.id)
+      if (!visual?.ground.active) continue
+
+      this.syncPlotVisualState(
+        plot,
+        visual,
+        visualNow,
+        !this.harvestVisualTransitions.has(plot.id),
+      )
+    }
+
+    this.scheduleNextCropVisualTransition()
+  }
+
+  private syncPlotVisualState(
+    plot: Plot,
+    visual: PlotVisual,
+    visualNow: number,
+    materializeCrop = true,
+  ) {
+    const { ground } = visual
+    const pest = plot.pest
+    const previousRemainingYield = ground.getData('lastRemainingYield') as
+      | number
+      | null
+      | undefined
+    const previousPestStatus = ground.getData('lastPestStatus') as
+      | PestStatus
+      | null
+      | undefined
+    const pestConsumedWithReduction =
+      previousPestStatus !== 'consumed' &&
+      pest?.status === 'consumed' &&
+      typeof previousRemainingYield === 'number' &&
+      typeof plot.remainingYield === 'number' &&
+      plot.remainingYield < previousRemainingYield
+    const resolvedVisual = resolvePlotVisual(plot, visualNow)
+    const resolvedCrop = materializeCrop ? resolvedVisual.crop : null
+
+    if (ground.texture.key !== resolvedVisual.groundTexture) {
+      ground.setTexture(resolvedVisual.groundTexture).setScale(PLOT_SCALE)
+    }
+
+    if (this.hasCropVisualChanged(visual, resolvedCrop)) {
+      this.removeReadyEffects(visual)
+      this.removePestVisual(visual)
+      this.removeCareBadge(visual)
+    }
+    this.syncCropVisual(visual, resolvedCrop)
+
+    if (!materializeCrop) {
+      // O estado autoritativo já avançou, mas toda a apresentação ligada à
+      // cultura seguinte permanece suspensa junto com o sprite. Isso evita
+      // cuidado, praga ou badges surgirem sobre o chão antes do fim do
+      // feedback da colheita.
+      this.removeReadyEffects(visual)
+      this.removePestVisual(visual)
+      this.removeCareBadge(visual)
+      ground.setData('lastRemainingYield', plot.remainingYield)
+      ground.setData('lastPestStatus', pest?.status ?? null)
+      return
+    }
+
+    this.syncCareBadge(visual, plot)
+
+    // Fora da transição visual, materializa normalmente o estado mais recente.
+    if (plot.seedId && plot.isReady) {
+      if (!ground.getData('glow')) {
+        this.restoreCropAppearance(visual.crop)
+        this.addReadyPulse(visual)
+        this.addGlowEffect(visual)
+      }
+
+      if (
+        typeof plot.remainingYield === 'number'
+        && plot.remainingYield > 0
+      ) {
+        const badge = ground.getData('yieldBadge')
+        if (!badge) {
+          this.addRemainingYieldBadge(
+            visual,
+            plot.remainingYield,
+            !pestConsumedWithReduction,
+          )
         }
 
-        if (
-          typeof plot.remainingYield === 'number'
-          && plot.remainingYield > 0
-        ) {
-          const badge = tile.getData('yieldBadge')
-          if (!badge) {
-            this.addRemainingYieldBadge(
-              tile,
+        if (previousRemainingYield !== plot.remainingYield) {
+          if (pestConsumedWithReduction) {
+            this.updateRemainingYieldBadge(
+              visual,
               plot.remainingYield,
-              !pestConsumedWithReduction,
+              0xf59e0b,
             )
+          } else {
+            this.setRemainingYieldBadgeValue(visual, plot.remainingYield)
           }
-
-          if (previousRemainingYield !== plot.remainingYield) {
-            if (pestConsumedWithReduction) {
-              this.updateRemainingYieldBadge(
-                tile,
-                plot.remainingYield,
-                0xf59e0b,
-              )
-            } else {
-              this.setRemainingYieldBadgeValue(
-                tile,
-                plot.remainingYield,
-              )
-            }
-          }
-        } else {
-          this.removeRemainingYieldBadge(tile)
         }
       } else {
-        // 🧹 remove efeitos se não estiver ready
-        const glow = tile.getData('glow')
-        this.tweens.killTweensOf(glow)
-        glow?.destroy()
-        tile.setData('glow', null)
-        this.tweens.killTweensOf(tile)
-        this.removeRemainingYieldBadge(tile)
+        this.removeRemainingYieldBadge(visual)
       }
-
-      this.syncPestVisual(tile, plot)
-
-      if (pestConsumedWithReduction) {
-        this.spawnPestConsumptionFeedback(
-          tile,
-          pest?.consumedAmount ?? null,
-        )
-      }
-
-      tile.setData('lastRemainingYield', plot.remainingYield)
-      tile.setData('lastPestStatus', pest?.status ?? null)
+    } else {
+      this.removeReadyEffects(visual)
     }
+
+    this.syncPestVisual(visual, plot)
+
+    if (pestConsumedWithReduction) {
+      this.spawnPestConsumptionFeedback(
+        visual,
+        pest?.consumedAmount ?? null,
+      )
+    }
+
+    ground.setData('lastRemainingYield', plot.remainingYield)
+    ground.setData('lastPestStatus', pest?.status ?? null)
   }
 
   private onHarvestDone = async (e: Event) => {
     const { plotId, xpGained } = (e as CustomEvent<PlotHarvestDone>).detail
 
-    const tile = this.plotTiles.get(plotId)
-    if (!tile) return
+    const visual = this.plotVisuals.get(plotId)
+    if (!visual) return
 
-    this.harvestPlot(tile, xpGained)
+    this.harvestPlot(plotId, visual, xpGained)
   }
 
   private onPlantDone = (e: Event) => {
     const { plotId, xpGained } = (e as CustomEvent<PlotPlantDone>).detail
 
-    const tile = this.plotTiles.get(plotId)
-    if (!tile) return
+    const visual = this.plotVisuals.get(plotId)
+    if (!visual) return
 
     this.time.delayedCall(0, () => {
-      this.spawnXp(tile.x, tile.y - 30, xpGained, 'PLANT')
+      this.spawnXp(
+        visual.ground.x,
+        this.getCropAnchorY(visual, 0.75),
+        xpGained,
+        'PLANT',
+      )
     })
   }
 
-  private harvestPlot(tile: Phaser.GameObjects.Image, xpGained: number) {
-    tile.setAlpha(0.3)
-    tile.disableInteractive()
+  private harvestPlot(
+    plotId: string,
+    visual: PlotVisual,
+    xpGained: number,
+  ) {
+    if (this.harvestVisualTransitions.has(plotId)) return
+    const currentPlot = this.farm.plots.find(plot => plot.id === plotId)
+    if (!currentPlot?.isReady) return
 
-    // 🔥 Remove glow e pulse
-    const glow = tile.getData('glow')
-    this.tweens.killTweensOf(glow)
-    glow?.destroy()
-    tile.setData('glow', null)
-    this.tweens.killTweensOf(tile)
-    this.removeRemainingYieldBadge(tile)
-    this.removeCareBadge(tile)
-    this.removePestVisual(tile)
-
-    // 🌱 Volta ao estado de plot vazio
-    tile.setScale(PLOT_SCALE)
+    // O feedback usa uma cópia transitória da cultura pronta e suspende a
+    // materialização do próximo crop. O farm:sync continua autoritativo e
+    // atualiza this.farm imediatamente; somente a troca visual aguarda.
+    this.removeReadyEffects(visual)
+    this.removePestVisual(visual)
+    const crop = visual.crop
+    const rewardX = visual.ground.x
+    const rewardY = this.getCropAnchorY(visual, 0.75)
 
     // 🌾 Animação de colheita
-    this.tweens.add({
-      targets: tile,
-      scale: tile.scale * 1.2,
-      duration: 150,
-      yoyo: true,
-      repeat: 1,
-      onComplete: () => {
-        tile.setAlpha(1)
+    if (crop) {
+      const harvestedCrop = this.add
+        .image(crop.x, crop.y, crop.texture.key)
+        .setName('harvest-animation-crop')
+        .setOrigin(crop.originX, crop.originY)
+        .setDisplaySize(crop.displayWidth, crop.displayHeight)
+        .setDepth(crop.depth + 0.5)
+      harvestedCrop.setData('plotId', plotId)
+
+      const transition: HarvestVisualTransition = {
+        animationCrop: harvestedCrop,
+        tween: null,
+        sourceCropStateKey: getCropStateKey(currentPlot),
+        animationFinished: false,
+        nextStateObserved: false,
       }
-    })
+      this.harvestVisualTransitions.set(plotId, transition)
+
+      // A cópia acima passa a ser a única representação do crop colhido.
+      // Um sync intermediário pode atualizar o ground, mas não cria o crop do
+      // ciclo seguinte atrás dela.
+      this.syncCropVisual(visual, null)
+
+      const baseScaleX = harvestedCrop.scaleX
+      const baseScaleY = harvestedCrop.scaleY
+      transition.tween = this.reduceMotion
+        ? this.tweens.add({
+            targets: harvestedCrop,
+            alpha: 0,
+            duration: 120,
+            ease: 'Linear',
+            onComplete: () => this.finishHarvestAnimation(plotId),
+          })
+        : this.tweens.add({
+            targets: harvestedCrop,
+            scaleX: baseScaleX * 1.2,
+            scaleY: baseScaleY * 1.2,
+            duration: 150,
+            yoyo: true,
+            repeat: 1,
+            onComplete: () => this.finishHarvestAnimation(plotId),
+          })
+    }
 
     // ✨ XP FLOAT (valor REAL vindo do backend)
-    this.spawnXp(tile.x, tile.y - 30, xpGained, 'HARVEST')
+    this.spawnXp(
+      rewardX,
+      rewardY,
+      xpGained,
+      'HARVEST',
+    )
+  }
 
-    // 🔄 Atualiza textura para plot vazio após animação
-    tile.setTexture('plot')
-    tile.setAlpha(1)
+  private finishHarvestAnimation(plotId: string) {
+    const transition = this.harvestVisualTransitions.get(plotId)
+    if (!transition) return
+
+    transition.tween = null
+    if (transition.animationCrop.active) {
+      transition.animationCrop.destroy()
+    }
+    transition.animationFinished = true
+
+    // Se o patch confirmado ainda não sincronizou, mantém o Plot sem crop em
+    // vez de restaurar um snapshot pronto já colhido. O próximo farm:sync
+    // materializa imediatamente o estado mais recente.
+    if (!transition.nextStateObserved) return
+
+    this.releaseHarvestVisualTransition(plotId)
+    const visual = this.plotVisuals.get(plotId)
+    const latestPlot = this.farm.plots.find(plot => plot.id === plotId)
+    if (!visual?.ground.active || !latestPlot) return
+
+    this.syncPlotVisualState(latestPlot, visual, Date.now())
+  }
+
+  private releaseHarvestVisualTransition(plotId: string) {
+    const transition = this.harvestVisualTransitions.get(plotId)
+    if (!transition) return
+
+    transition.tween?.stop()
+    if (transition.animationCrop.active) {
+      this.tweens.killTweensOf(transition.animationCrop)
+      transition.animationCrop.destroy()
+    }
+    this.harvestVisualTransitions.delete(plotId)
+  }
+
+  private cleanupHarvestVisualTransitions() {
+    for (const plotId of this.harvestVisualTransitions.keys()) {
+      this.releaseHarvestVisualTransition(plotId)
+    }
   }
 
   private onCareDone = (e: Event) => {
@@ -1363,15 +1728,15 @@ export default class FarmScene extends Phaser.Scene {
       xpGained,
     } = (e as CustomEvent<PlotCareDone>).detail
 
-    const tile = this.plotTiles.get(plotId)
-    if (!tile) return
+    const visual = this.plotVisuals.get(plotId)
+    if (!visual) return
 
     this.time.delayedCall(0, () => {
-      this.removeCareBadge(tile)
-      this.animatePlotCare(tile)
+      this.removeCareBadge(visual)
+      this.animatePlotCare(visual)
 
-      const rewardX = tile.x
-      const rewardY = tile.y - tile.displayHeight * 0.9
+      const rewardX = visual.ground.x
+      const rewardY = this.getCropAnchorY(visual, 0.9)
       const xpDelay = coinsGained > 0
         ? this.spawnCoinReward(rewardX, rewardY, coinsGained)
         : 0
@@ -1392,18 +1757,18 @@ export default class FarmScene extends Phaser.Scene {
       xpGained,
     } = (e as CustomEvent<PlotPestRemoveDone>).detail
 
-    const tile = this.plotTiles.get(plotId)
-    if (!tile) return
+    const visual = this.plotVisuals.get(plotId)
+    if (!visual) return
     const currentPlot = this.farm.plots.find(plot => plot.id === plotId)
 
     // An idempotent retry can arrive after another planting cycle. Keep a
     // confirmed result from hiding or rewarding feedback over a newer pest.
     if (currentPlot?.pest?.occurrenceId !== pestOccurrenceId) return
 
-    this.removePestVisual(tile)
+    this.removePestVisual(visual)
 
-    const rewardX = tile.x
-    const rewardY = tile.y - tile.displayHeight * 0.9
+    const rewardX = visual.ground.x
+    const rewardY = this.getCropAnchorY(visual, 0.9)
     const xpDelay = coinsGained > 0
       ? this.spawnCoinReward(rewardX, rewardY, coinsGained)
       : 0
@@ -1417,19 +1782,20 @@ export default class FarmScene extends Phaser.Scene {
     }
   }
 
-  private animatePlotCare(tile: Phaser.GameObjects.Image) {
-    tile.setTint(0x93c5fd)
+  private animatePlotCare(visual: PlotVisual) {
+    const crop = visual.crop
+    crop?.setTint(0x93c5fd)
 
     this.time.delayedCall(this.reduceMotion ? 120 : 480, () => {
-      if (tile.scene) tile.clearTint()
+      if (crop?.scene) crop.clearTint()
     })
 
     if (this.reduceMotion) return
 
     for (let index = 0; index < 4; index += 1) {
       const drop = this.add.circle(
-        tile.x - 12 + index * 8,
-        tile.y - tile.displayHeight - 16 - (index % 2) * 6,
+        visual.ground.x - 12 + index * 8,
+        this.getCropAnchorY(visual) - 16 - (index % 2) * 6,
         2.5,
         0x38bdf8,
         0.9,
@@ -1437,7 +1803,7 @@ export default class FarmScene extends Phaser.Scene {
 
       this.tweens.add({
         targets: drop,
-        y: tile.y - tile.displayHeight * 0.25,
+        y: visual.ground.y - FARM_TILE_HEIGHT * 0.25,
         alpha: 0,
         scale: 0.6,
         delay: index * 55,
@@ -1447,13 +1813,16 @@ export default class FarmScene extends Phaser.Scene {
       })
     }
 
-    this.tweens.add({
-      targets: tile,
-      scale: tile.scale * 1.025,
-      duration: 180,
-      ease: 'Sine.easeInOut',
-      yoyo: true,
-    })
+    if (crop) {
+      this.tweens.add({
+        targets: crop,
+        scaleX: crop.scaleX * 1.025,
+        scaleY: crop.scaleY * 1.025,
+        duration: 180,
+        ease: 'Sine.easeInOut',
+        yoyo: true,
+      })
+    }
   }
 
   private spawnCoinReward(
@@ -1528,41 +1897,48 @@ export default class FarmScene extends Phaser.Scene {
       pestCancelled,
     } = (e as CustomEvent<PlotStealDone>).detail
 
-    const tile = this.plotTiles.get(plotId)
-    if (!tile) return
+    const visual = this.plotVisuals.get(plotId)
+    if (!visual) return
 
     // ⏱ aguarda o Phaser estabilizar a cena
     this.time.delayedCall(0, () => {
       if (pestCancelled) {
         // A confirmação vem no resultado autoritativo do roubo; farm:sync
         // continua sendo a fonte do status persistido da infestação.
-        this.removePestVisual(tile)
-        this.spawnPestTheftFeedback(tile)
+        this.removePestVisual(visual)
+        this.spawnPestTheftFeedback(visual)
       }
       // 1️⃣ Atualiza badge
-      this.updateRemainingYieldBadge(tile, remainingYield)
+      this.updateRemainingYieldBadge(visual, remainingYield)
       // 2️⃣ Animação de roubo
-      this.animatePlotSteal(tile)
+      this.animatePlotSteal(visual)
       // 3 XP Float
-      this.spawnXp(tile.x, tile.y - 30, xpGained, 'STEAL')
+      this.spawnXp(
+        visual.ground.x,
+        this.getCropAnchorY(visual, 0.75),
+        xpGained,
+        'STEAL',
+      )
     })
   }
 
-  private animatePlotSteal(tile: Phaser.GameObjects.Image) {
+  private animatePlotSteal(visual: PlotVisual) {
+    const crop = visual.crop
 
-    this.tweens.add({
-      targets: tile,
-      //angle: { from: -5, to: 5 },
-      x: tile.x + 2,
-      yoyo: true,
-      repeat: 4,
-      duration: 60
-    })
+    if (crop) {
+      this.tweens.add({
+        targets: crop,
+        x: crop.x + 2,
+        yoyo: true,
+        repeat: 4,
+        duration: 60,
+      })
+    }
 
     // 💨 Partícula / fumaça
     const puff = this.add.circle(
-      tile.x,
-      tile.y - 12,
+      visual.ground.x,
+      this.getCropAnchorY(visual, 0.45),
       6,
       0x000000,
       0.3

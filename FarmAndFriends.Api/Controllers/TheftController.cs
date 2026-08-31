@@ -77,6 +77,19 @@ public class TheftController : ControllerBase
         if (plot.SeedId == null)
             return BadRequest("Nada plantado.");
 
+        var seed = await _context.Seeds.FindAsync(plot.SeedId);
+        if (seed == null)
+            return CropCycleStateInvalid();
+
+        try
+        {
+            CropCycleRules.ValidateCurrentCycle(plot, seed);
+        }
+        catch (InvalidOperationException)
+        {
+            return CropCycleStateInvalid();
+        }
+
         if (plot.ReadyAt == null || plot.ReadyAt > now)
             return BadRequest("Plantação não está pronta.");
 
@@ -85,10 +98,6 @@ public class TheftController : ControllerBase
         {
             return YieldUnavailable();
         }
-
-        var seed = await _context.Seeds.FindAsync(plot.SeedId);
-        if (seed == null)
-            return BadRequest("Semente inválida.");
 
         var today = now.Date;
         var alreadyStolenToday = await _context.TheftLogs
@@ -113,16 +122,17 @@ public class TheftController : ControllerBase
             return BadRequest(exception.Message);
         }
 
-        var ownerWillReceive = remainingYield - result.StolenAmount;
-        plot.RemainingYield = ownerWillReceive;
-        var pestCancelled = PestRules.CancelActiveByTheft(plot, now);
-
         var inventory = await _context.Inventories
             .Include(candidate => candidate.Items)
             .FirstAsync(candidate => candidate.UserId == thiefUserId);
         var cropItem = inventory.Items.FirstOrDefault(item =>
             item.ItemType == ItemType.Crop
             && item.ItemId == seed.CropId);
+
+        var inventoryTotal = (long)(cropItem?.Quantity ?? 0)
+            + result.StolenAmount;
+        if (inventoryTotal is < 0 or > int.MaxValue)
+            return InventoryCapacityExceeded();
 
         if (cropItem == null)
         {
@@ -136,7 +146,10 @@ public class TheftController : ControllerBase
             inventory.Items.Add(cropItem);
         }
 
-        cropItem.Quantity += result.StolenAmount;
+        var ownerWillReceive = remainingYield - result.StolenAmount;
+        plot.RemainingYield = ownerWillReceive;
+        var pestCancelled = PestRules.CancelActiveByTheft(plot, now);
+        cropItem.Quantity = (int)inventoryTotal;
 
         var theftLog = new TheftLog
         {
@@ -152,8 +165,8 @@ public class TheftController : ControllerBase
         _context.TheftLogs.Add(theftLog);
 
         var theftMessage = result.GotBonus
-            ? $"{thief.Username} roubou {result.StolenAmount} unidades de {seed.Name.ToLowerInvariant()} da sua fazenda."
-            : $"{thief.Username} roubou {result.StolenAmount} {seed.Name.ToLowerInvariant()} da sua fazenda.";
+            ? $"{thief.Username} roubou {result.StolenAmount} unidades de {seed.CropName.ToLowerInvariant()} da sua fazenda."
+            : $"{thief.Username} roubou {result.StolenAmount} {seed.CropName.ToLowerInvariant()} da sua fazenda.";
         _context.Notifications.Add(new Notification
         {
             Id = Guid.NewGuid(),
@@ -185,4 +198,34 @@ public class TheftController : ControllerBase
                 "O rendimento persistido deste lote está ausente ou inválido. Nenhum roubo foi concedido.",
             statusCode: StatusCodes.Status500InternalServerError,
             title: "Rendimento do lote indisponível");
+
+    private ObjectResult InventoryCapacityExceeded()
+    {
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status409Conflict,
+            Title = "Capacidade do inventário excedida",
+            Detail =
+                "A colheita roubada excederia a capacidade do inventário. Nenhum roubo foi concedido."
+        };
+        problem.Extensions["code"] =
+            FarmAndFriends.Api.Contracts.Plots.PlotErrorCodes
+                .InventoryCapacityExceeded;
+        return StatusCode(StatusCodes.Status409Conflict, problem);
+    }
+
+    private ObjectResult CropCycleStateInvalid()
+    {
+        var problem = new ProblemDetails
+        {
+            Status = StatusCodes.Status500InternalServerError,
+            Title = "Estado produtivo do lote inválido",
+            Detail =
+                "O ciclo produtivo persistido está inconsistente. Nenhum roubo foi concedido."
+        };
+        problem.Extensions["code"] =
+            FarmAndFriends.Api.Contracts.Plots.PlotErrorCodes
+                .CropCycleStateInvalid;
+        return StatusCode(StatusCodes.Status500InternalServerError, problem);
+    }
 }

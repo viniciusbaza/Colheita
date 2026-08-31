@@ -2,11 +2,53 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   formatCountdown,
+  formatTimeRemaining,
+  formatTimeSpanDuration,
   getNextCareAt,
   getNextFarmStateAt,
   getNextPestOrProtectionAt,
   getNextPlotReadyAt,
+  parseTimeSpanToSeconds,
 } from '../src/utils/time.ts'
+
+test('formats crop deadlines with compact seconds, minutes, and hours', () => {
+  const now = Date.parse('2026-08-23T10:00:00.000Z')
+
+  assert.equal(
+    formatTimeRemaining('2026-08-23T10:00:42.000Z', now),
+    '42s',
+  )
+  assert.equal(
+    formatTimeRemaining('2026-08-23T10:08:42.000Z', now),
+    '8m 42s',
+  )
+  assert.equal(
+    formatTimeRemaining('2026-08-23T11:08:42.000Z', now),
+    '1h 8m',
+  )
+  assert.equal(
+    formatTimeRemaining('2026-08-23T09:59:59.000Z', now),
+    '✅',
+  )
+})
+
+test('parses .NET durations with and without a day component', () => {
+  assert.equal(parseTimeSpanToSeconds('02:30:00'), 9_000)
+  assert.equal(parseTimeSpanToSeconds('2.03:04:05'), 183_845)
+  assert.equal(parseTimeSpanToSeconds('1.00:00:00.5000000'), 86_400)
+})
+
+test('rejects malformed .NET durations instead of returning a partial value', () => {
+  assert.equal(Number.isNaN(parseTimeSpanToSeconds('2 days')), true)
+  assert.equal(Number.isNaN(parseTimeSpanToSeconds('1.24:00:00')), true)
+  assert.equal(Number.isNaN(parseTimeSpanToSeconds('00:60:00')), true)
+})
+
+test('formats seed durations for compact shop metadata', () => {
+  assert.equal(formatTimeSpanDuration('02:00:00'), '2h')
+  assert.equal(formatTimeSpanDuration('1.12:30:00'), '1 dia 12h 30min')
+  assert.equal(formatTimeSpanDuration('invalid'), '—')
+})
 
 test('formats display-only pest and protection countdowns', () => {
   const now = Date.parse('2026-07-30T10:00:00.000Z')

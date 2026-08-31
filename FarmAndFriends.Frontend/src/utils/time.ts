@@ -6,8 +6,13 @@ export function formatTimeRemaining(readyAt: string, now = Date.now()) {
   if (diffMs <= 0) return '✅'
 
   const totalSeconds = Math.floor(diffMs / 1000)
-  const minutes = Math.floor(totalSeconds / 60)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
   const seconds = totalSeconds % 60
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`
+  }
 
   if (minutes > 0) {
     return `${minutes}m ${seconds}s`
@@ -175,6 +180,43 @@ export function getNextFarmStateAt(
 }
 
 export function parseTimeSpanToSeconds(time: string) {
-  const [h, m, s] = time.split(':').map(Number)
-  return h * 3600 + m * 60 + s
+  const match = /^(?:(\d+)\.)?(\d{1,2}):(\d{2}):(\d{2})(?:\.\d+)?$/.exec(time)
+  if (!match) return Number.NaN
+
+  const [, daysText, hoursText, minutesText, secondsText] = match
+  const days = Number(daysText ?? 0)
+  const hours = Number(hoursText)
+  const minutes = Number(minutesText)
+  const seconds = Number(secondsText)
+
+  if (
+    !Number.isSafeInteger(days)
+    || !Number.isSafeInteger(hours)
+    || !Number.isSafeInteger(minutes)
+    || !Number.isSafeInteger(seconds)
+    || (daysText !== undefined && hours > 23)
+    || minutes > 59
+    || seconds > 59
+  ) {
+    return Number.NaN
+  }
+
+  const totalSeconds = days * 86_400 + hours * 3_600 + minutes * 60 + seconds
+  return Number.isSafeInteger(totalSeconds) ? totalSeconds : Number.NaN
+}
+
+export function formatTimeSpanDuration(time: string) {
+  const totalSeconds = parseTimeSpanToSeconds(time)
+  if (!Number.isFinite(totalSeconds)) return '—'
+
+  const days = Math.floor(totalSeconds / 86_400)
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600)
+  const minutes = Math.floor((totalSeconds % 3_600) / 60)
+  const parts: string[] = []
+
+  if (days > 0) parts.push(`${days} ${days === 1 ? 'dia' : 'dias'}`)
+  if (hours > 0) parts.push(`${hours}h`)
+  if (minutes > 0) parts.push(`${minutes}min`)
+
+  return parts.length > 0 ? parts.join(' ') : `${totalSeconds}s`
 }

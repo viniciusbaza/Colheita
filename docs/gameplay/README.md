@@ -76,7 +76,10 @@ A seed defines gameplay properties such as:
 
 * purchase price;
 * crop produced;
+* crop display name;
 * growth time;
+* total harvest cycles;
+* regrowth time when there is more than one cycle;
 * crop amount;
 * minimum level.
 
@@ -88,12 +91,13 @@ Crops may currently be sold in the shop.
 
 ### RemainingYield
 
-The amount of crop still available in a ready plot.
+The amount of crop still available in the current production cycle.
 
 RemainingYield decreases when theft or an unresolved pest consumes production.
 
 RemainingYield is authoritative while a crop is planted. It is initialized on
-planting, awarded on harvest and cleared when the plot becomes empty.
+planting, awarded on harvest, reset to the full configured amount for each new
+production cycle and cleared when the plot becomes empty.
 
 Theft and pest damage must never reduce RemainingYield below one unit.
 
@@ -104,7 +108,7 @@ The owner must retain a meaningful harvest after theft.
 A server-controlled threat that may affect a ready, unprotected crop after its
 safety period.
 
-The MVP pest is a caterpillar. One planted crop may receive at most one
+The MVP pest is a caterpillar. One production cycle may receive at most one
 infestation, and an infestation can consume at most one unit. A successful
 manual removal is a distinct helping action: the actor may receive a small,
 server-confirmed XP and standard-currency reward, regardless of whether the
@@ -128,10 +132,11 @@ does not change the crop's production, growth or theft state.
 
 ### Care opportunity
 
-The server-created identity for the care state of one planted crop.
+The server-created identity for the care state of one production cycle.
 
-It begins when that crop is planted and remains valid while the crop is
-growing. Opening or refreshing a farm does not create a care opportunity.
+It begins when the crop is planted or starts a later production cycle and
+remains valid while that cycle is growing. Opening or refreshing a farm does
+not create a care opportunity.
 
 ### Visitor-farm care cycle
 
@@ -154,7 +159,17 @@ GROWING
   ↓ readyAt reached
 READY
   ↓ harvest
-EMPTY
+EMPTY (final harvest)
+```
+
+For a crop with more than one harvest cycle, a non-final harvest follows:
+
+```text
+READY (cycle N)
+  ↓ harvest
+REGROWING (cycle N+1)
+  ↓ readyAt reached
+READY (cycle N+1)
 ```
 
 A theft action does not clear the plot.
@@ -232,6 +247,7 @@ A successful planting action:
 * consumes one seed;
 * sets the planted seed;
 * records the planting timestamp;
+* starts harvest cycle 1 and records its start;
 * calculates the ready timestamp on the server;
 * initializes RemainingYield from the seed's crop amount;
 * grants the approved planting XP;
@@ -246,6 +262,7 @@ Growth is based on server timestamps.
 Important timestamps include:
 
 * `plantedAt`;
+* `currentHarvestCycleStartedAt` on the backend;
 * `readyAt`.
 
 The frontend may calculate visual progress from these timestamps.
@@ -267,14 +284,29 @@ A plot may be harvested when:
 * the crop is ready;
 * RemainingYield is greater than zero.
 
-A successful harvest:
+A successful harvest always:
 
 * grants the current RemainingYield to the owner's crop inventory;
 * grants the approved harvest XP;
-* clears the planted seed;
-* clears growth timestamps;
-* resets RemainingYield;
-* returns the plot to the empty state.
+* closes pest and care state for the completed production cycle.
+
+When another configured cycle exists, the same transaction advances the
+one-based cycle, starts `RegrowTime`, restores `RemainingYield` to the full
+`CropAmount` and creates new pest and care opportunities. `SeedId`, original
+`PlantedAt` and `ProtectedUntil` remain unchanged. On the final harvest, the
+planted crop, cycle timestamps and yield are cleared and the plot becomes
+empty.
+
+In the initial catalog, Tomato has two harvest cycles with a two-minute initial
+growth and a two-minute regrow period. Apple Tree has three harvest cycles with
+a two-hour initial growth and a one-hour regrow period. The configured
+`CropAmount` applies independently to every cycle.
+
+The initial growth is presented as planted soil during the first quarter,
+`sprout` until halfway, and a fruitless adult `mature` crop until the backend
+confirms it is ready. A recurring crop returns to the same `mature` visual after
+an intermediate harvest and remains there until its next production is ready.
+Only the ready visual may show harvestable produce.
 
 A harvest action must not grant rewards more than once.
 
@@ -365,8 +397,9 @@ Care and theft remain independent and may both occur during the same visit.
 Care must not hide a theft action or its history.
 
 If nobody cares for a crop, the owner receives no delay, damage or yield
-reduction. The care opportunity becomes inactive when the crop stops growing
-and is cleared when the crop is harvested.
+reduction. The care opportunity becomes inactive when the production becomes
+ready and is cleared when that cycle is harvested. A later production cycle
+receives a new opportunity without resetting visitor-farm reward limits.
 
 ## Theft
 

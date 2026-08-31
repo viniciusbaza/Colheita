@@ -1,12 +1,26 @@
 import type {
   Farm,
+  HarvestRequest,
+  HarvestResponse,
   PestActionResponse,
   Plot,
   StealResponse,
 } from '../types/Farm'
 
 export type ConfirmedPlotPatch = Partial<
-  Pick<Plot, 'pest' | 'protectedUntil' | 'remainingYield'>
+  Pick<
+    Plot,
+    | 'care'
+    | 'currentHarvestCycle'
+    | 'isReady'
+    | 'pest'
+    | 'plantedAt'
+    | 'protectedUntil'
+    | 'readyAt'
+    | 'remainingYield'
+    | 'seedId'
+    | 'state'
+  >
 >
 
 export type ConfirmedPlotPatchFactory = (
@@ -44,6 +58,42 @@ export function confirmedTheftPatch(
     remainingYield: response.ownerWillReceive,
     pest: response.pestCancelled ? null : plot.pest,
   }
+}
+
+export function confirmedHarvestPatch(
+  response: HarvestResponse,
+): ConfirmedPlotPatch {
+  if (response.currentHarvestCycle === null) {
+    return {
+      care: null,
+      currentHarvestCycle: null,
+      isReady: false,
+      pest: null,
+      plantedAt: null,
+      readyAt: null,
+      remainingYield: null,
+      seedId: null,
+      state: 'empty',
+    }
+  }
+
+  return {
+    care: null,
+    currentHarvestCycle: response.currentHarvestCycle,
+    isReady: false,
+    pest: null,
+    readyAt: response.readyAt,
+    remainingYield: null,
+    state: 'growing',
+  }
+}
+
+export function getHarvestCyclePrecondition(
+  plot: Pick<Plot, 'currentHarvestCycle'>,
+): HarvestRequest | null {
+  return plot.currentHarvestCycle === null
+    ? null
+    : { expectedHarvestCycle: plot.currentHarvestCycle }
 }
 
 export function confirmedPestRemovalPatch(

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  confirmedHarvestPatch,
   confirmedPestRemovalPatch,
   confirmedTheftPatch,
+  getHarvestCyclePrecondition,
   getPestRemovalAttempt,
   isCurrentFarmRequest,
   patchFarmPlot,
@@ -20,6 +22,7 @@ const activePlot: Plot = {
   unlocked: true,
   seedId: 'corn',
   plantedAt: '2026-07-30T09:00:00.000Z',
+  currentHarvestCycle: 1,
   isReady: true,
   readyAt: '2026-07-30T09:10:00.000Z',
   remainingYield: 3,
@@ -203,6 +206,79 @@ test('confirmed theft updates yield and removes only a pest cancellation confirm
   assert.equal(cancelled.plots[0].pest, null)
   assert.equal(preserved.plots[0].remainingYield, 2)
   assert.equal(preserved.plots[0].pest?.status, 'active')
+})
+
+test('confirmed intermediate harvest starts the next cycle without clearing the crop', () => {
+  const patch = confirmedHarvestPatch({
+    id: activePlot.id,
+    crop: 'corn_crop',
+    amount: 3,
+    inventoryTotal: 8,
+    xpGained: 25,
+    currentHarvestCycle: 2,
+    readyAt: '2026-07-30T10:30:00.000Z',
+  })
+  const nextFarm = patchFarmPlot(farm, activePlot.id, patch)
+  const nextPlot = nextFarm.plots[0]
+
+  assert.equal(nextPlot.seedId, activePlot.seedId)
+  assert.equal(nextPlot.plantedAt, activePlot.plantedAt)
+  assert.equal(nextPlot.currentHarvestCycle, 2)
+  assert.equal(nextPlot.readyAt, '2026-07-30T10:30:00.000Z')
+  assert.equal(nextPlot.isReady, false)
+  assert.equal(nextPlot.remainingYield, null)
+  assert.equal(nextPlot.pest, null)
+  assert.equal(nextPlot.care, null)
+  assert.equal(nextPlot.protectedUntil, activePlot.protectedUntil)
+  assert.equal(nextPlot.state, 'growing')
+})
+
+test('confirmed final harvest clears the crop but preserves plot protection', () => {
+  const protectedPlot: Plot = {
+    ...activePlot,
+    protectedUntil: '2026-07-30T15:30:00.000Z',
+  }
+  const protectedFarm = { ...farm, plots: [protectedPlot] }
+  const nextFarm = patchFarmPlot(
+    protectedFarm,
+    protectedPlot.id,
+    confirmedHarvestPatch({
+      id: protectedPlot.id,
+      crop: 'corn_crop',
+      amount: 3,
+      inventoryTotal: 8,
+      xpGained: 25,
+      currentHarvestCycle: null,
+      readyAt: null,
+    }),
+  )
+  const nextPlot = nextFarm.plots[0]
+
+  assert.equal(nextPlot.seedId, null)
+  assert.equal(nextPlot.plantedAt, null)
+  assert.equal(nextPlot.currentHarvestCycle, null)
+  assert.equal(nextPlot.readyAt, null)
+  assert.equal(nextPlot.isReady, false)
+  assert.equal(nextPlot.remainingYield, null)
+  assert.equal(nextPlot.pest, null)
+  assert.equal(nextPlot.care, null)
+  assert.equal(nextPlot.protectedUntil, protectedPlot.protectedUntil)
+  assert.equal(nextPlot.state, 'empty')
+})
+
+test('builds a harvest precondition from every persisted crop cycle', () => {
+  assert.deepEqual(
+    getHarvestCyclePrecondition({ currentHarvestCycle: 1 }),
+    { expectedHarvestCycle: 1 },
+  )
+  assert.deepEqual(
+    getHarvestCyclePrecondition({ currentHarvestCycle: 3 }),
+    { expectedHarvestCycle: 3 },
+  )
+  assert.equal(
+    getHarvestCyclePrecondition({ currentHarvestCycle: null }),
+    null,
+  )
 })
 
 test('only the newest farm request may commit its response', () => {

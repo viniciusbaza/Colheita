@@ -248,6 +248,8 @@ public sealed class PestRemovalRewardIntegrationTests
             PestRules.ResetCycle(plot);
             plot.SeedId = "corn";
             plot.PlantedAt = now.AddMinutes(-10);
+            plot.CurrentHarvestCycle = 1;
+            plot.CurrentHarvestCycleStartedAt = now.AddMinutes(-10);
             plot.ReadyAt = now.AddMinutes(-5);
             plot.RemainingYield = 3;
             plot.PestOccurrenceId = replacementOccurrenceId;
@@ -694,6 +696,8 @@ public sealed class PestRemovalRewardIntegrationTests
             Unlocked = true,
             SeedId = "corn",
             PlantedAt = now.AddHours(-1),
+            CurrentHarvestCycle = 1,
+            CurrentHarvestCycleStartedAt = now.AddHours(-1),
             ReadyAt = now.AddMinutes(-30),
             RemainingYield = 3,
             PestOccurrenceId = occurrenceId ?? Guid.NewGuid(),

@@ -20,6 +20,7 @@ public record PlotResponse(
     bool Unlocked,
     string? SeedId,
     DateTime? PlantedAt,
+    int? CurrentHarvestCycle,
     bool IsReady,
     DateTime? ReadyAt,
     int? RemainingYield,

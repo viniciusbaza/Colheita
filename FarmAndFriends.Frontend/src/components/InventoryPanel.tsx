@@ -48,12 +48,20 @@ export function InventoryPanel({ onClose }: Props) {
   const visibleItems = items
     .filter(item => filter === 'all' || item.itemType === filter)
     .sort((left, right) => {
+      const leftSeed = left.itemType === 'Item'
+        ? undefined
+        : getSeedByItem(left.itemType, left.itemId)
+      const rightSeed = right.itemType === 'Item'
+        ? undefined
+        : getSeedByItem(right.itemType, right.itemId)
       const leftName = left.itemType === 'Item'
         ? (getItem(left.itemId)?.name ?? left.itemId)
-        : (getSeedByItem(left.itemType, left.itemId)?.name ?? left.itemId)
+        : (left.itemType === 'Crop' ? leftSeed?.cropName : leftSeed?.name)
+          ?? left.itemId
       const rightName = right.itemType === 'Item'
         ? (getItem(right.itemId)?.name ?? right.itemId)
-        : (getSeedByItem(right.itemType, right.itemId)?.name ?? right.itemId)
+        : (right.itemType === 'Crop' ? rightSeed?.cropName : rightSeed?.name)
+          ?? right.itemId
       return leftName.localeCompare(rightName, 'pt-BR')
     })
 
@@ -182,6 +190,9 @@ export function InventoryPanel({ onClose }: Props) {
                   : getSeedByItem(item.itemType, item.itemId)
                 const isSeed = item.itemType === 'Seed'
                 const isCrop = item.itemType === 'Crop'
+                const catalogName = isCrop && catalogItem && 'cropName' in catalogItem
+                  ? catalogItem.cropName
+                  : catalogItem?.name
 
                 return (
                   <article
@@ -202,7 +213,7 @@ export function InventoryPanel({ onClose }: Props) {
                     </span>
                     <div className="min-w-0 flex-1">
                       <h3 className="truncate font-semibold">
-                        {catalogItem?.name ?? item.itemId}
+                        {catalogName ?? item.itemId}
                       </h3>
                       <p className="text-xs text-emerald-600">
                         {isSeed
