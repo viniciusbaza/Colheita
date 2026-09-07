@@ -24,7 +24,7 @@ ExecPlan location.
 
 Status: Active
 
-Last reviewed: 2026-08-11
+Last reviewed: 2026-09-05
 
 Product owner: Rato
 
@@ -879,7 +879,36 @@ Possible metrics include:
 * return visits between the same players;
 * percentage of visits with an interaction;
 * percentage of visits without theft that still produce value;
-* response rate after receiving a social notification.
+* response rate after receiving a social notification;
+* feed open rate;
+* percentage of displayed return CTAs that lead to a completed visit;
+* conversion from an attributed farm event to a completed friend visit;
+* percentage of feed-originated visits that produce a meaningful interaction;
+* theft after returning through a feed CTA;
+* concentration of negative events and return visits between the same pair;
+* friendship removals following repeated negative events;
+* shop and inventory opens after the floating HUD change.
+
+### Future social instrumentation
+
+There is no analytics infrastructure in the current prototype. Before adding
+one, event names, retention and pseudonymization require a privacy review.
+Product analysis should distinguish these future signals:
+
+* `events_feed_opened` for an actual feed opening;
+* `events_feed_cta_shown` for an eligible return action rendered to the player;
+* `events_feed_visit_started` for selecting that action;
+* `friend_visit_completed` only after the server authorizes and the requested
+  farm finishes loading;
+* `friend_visit_meaningful_interaction` only after a care, pest, protection or
+  theft action is confirmed by the backend;
+* `hud_shortcut_opened` for shop and inventory access after the HUD change;
+* `friendship_removed` as the future source for analyzing friendship removals
+  after concentrated negative events.
+
+An ignored request for the farm already active is not a new completed visit.
+Instrumentation must not transmit notification message text, farm contents or
+ready-crop state. These events measure behavior only and never grant rewards.
 
 ### Theft health
 
@@ -1183,7 +1212,6 @@ during implementation:
 * Should decorations have gameplay effects?
 * How should pests create anticipation without anxiety?
 * How should crop protection work without selling relief from artificial pain?
-* What information should social notifications contain?
 * Which interactions should be reciprocal?
 * What should premium currency support in the first public version?
 * How should inactive or returning players be welcomed?

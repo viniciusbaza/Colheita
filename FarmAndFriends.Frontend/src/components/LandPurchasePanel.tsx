@@ -41,9 +41,9 @@ const currencyPresentation: Record<
     balanceLabel: 'moedas',
   },
   premiumCoins: {
-    icon: '💎',
-    label: 'Moedas premium',
-    balanceLabel: 'moedas premium',
+    icon: '💵',
+    label: 'Notas',
+    balanceLabel: 'notas',
   },
 }
 

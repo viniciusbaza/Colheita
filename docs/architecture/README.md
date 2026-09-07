@@ -13,7 +13,7 @@ The reasoning behind major technical choices belongs in `docs/decisions/`.
 
 Status: Active
 
-Last reviewed: 2026-08-18
+Last reviewed: 2026-09-05
 
 ## System overview
 
@@ -719,6 +719,127 @@ The current runtime values are bound from the `CropCare` section of
 Property initializers in `CropCareOptions` are fallback values. The bound
 runtime configuration above is the source for the currently documented
 experiment.
+
+## Player profile
+
+The profile prototype contains exactly five free, bundled farm-animal portraits.
+`User.AvatarId` stores an allowlisted ID (`avatar-1` through `avatar-5`); the
+default is `avatar-1`. The additive migration supplies the default for existing
+accounts without resetting player data. No image URL, uploaded file, currency
+or reward is accepted by this workflow.
+
+`GET /users/me` and `GET /friends` add `avatarId` to their existing responses.
+The authenticated `PATCH /users/me/avatar` receives `{ avatarId }` and returns
+`200 { avatarId }`. An absent or unsupported choice is `400`; an invalid or
+missing authenticated identity is `401`. The target account is derived only
+from JWT claims. Saving the same value repeatedly has no additional effect.
+
+React owns the temporary selection and only applies a successful server
+response to the avatar field in shared user state. Concurrent XP changes are
+not replaced by a profile snapshot. Known IDs resolve to bundled artwork;
+missing or unknown IDs use the default portrait rather than external URLs.
+
+Saving has a 15-second client deadline and abort signal. Even an unresponsive
+transport cannot leave the modal permanently locked. A timeout means the save
+could not be confirmed, not that the server rolled it back; retrying the same ID
+is safe. Duplicate in-flight saves are deduplicated by the shared user provider.
+
+The profile modal reuses `ui:modal` with `{ source: 'profile', open }`, sent by
+React and consumed by Phaser's existing modal-blocker set. Closing/unmounting
+removes only the profile blocker. The HUD always edits the authenticated
+player's profile, including during a friend visit. Friends receive the latest
+avatar through the existing social refresh/polling.
+
+The same modal edits the authenticated player's farm name. `GET /users/me`
+includes `farmId` and `farmName`; `PATCH /users/me/profile` accepts
+`{ avatarId, farmName }` and returns `{ avatarId, farmId, farmName }`. The server
+trims the name, requires at least one non-whitespace character and limits it to
+30 characters. Avatar and farm name commit together in one transaction; the
+avatar-only endpoint remains available for compatibility. No migration is
+needed because the farm name already exists.
+
+After confirmation, React updates the shared profile and own-farm snapshot and
+closes the modal immediately. An older farm request cannot overwrite the
+confirmed name. While visiting, the cached own farm updates without changing
+the visible friend's farm. A failed save keeps both drafts for retry.
+
+`UserContext` and `FarmContext` intentionally expose different read models.
+`UserContext` owns the authenticated player's profile and the identity summary
+of that player's own farm (`farmId` and `farmName`), which must remain available
+even during a visit. `FarmContext` owns the complete farm snapshot currently
+rendered by React and Phaser, which may belong to a friend. Neither client
+projection is authoritative over persistence; the confirmed profile response
+is the source for a local profile update, and the backend remains authoritative.
+
+The profile flow coordinates both projections after a confirmed rename. It
+updates the own-farm identity in `UserContext` and updates or caches the own-farm
+snapshot in `FarmContext` without renaming the visible friend's farm. Any future
+profile mutation or cross-session refresh must use the same coordinated path;
+adding an independent writer for either farm name would risk divergence.
+
+## Farm events feed and social response
+
+The authenticated events feed reuses persistent `Notifications` as a
+player-facing history. It is not an economy ledger and never authorizes a
+gameplay action or grants a reward.
+
+```text
+GET   /notifications/feed?cursor={opaqueCursor}&take={1..100}
+PATCH /notifications/feed/read-all
+PATCH /notifications/{notificationId}/read
+```
+
+The server defines a seven-day UTC window. Pages are ordered by
+`CreatedAt DESC, Id DESC`; the opaque cursor contains both values so events
+with equal timestamps are neither skipped nor repeated. Reading an event only
+sets `ReadAt`; it does not remove the event from the feed. The feed response is
+`{ items, nextCursor, windowStartUtc, unreadCount }`, and malformed cursors
+return `400 Bad Request`.
+
+The existing notification list, unread-count, individual-read, and legacy
+`PATCH /notifications/read-all` endpoints remain available for compatibility
+while consumers migrate to the feed.
+
+React presents two categories: farm events and friendship events. Attributed
+care, pest removal, pest protection, theft, and accepted friendships may show
+a neutral visit action only while the actor is present in the current accepted
+friends projection. The client-provided visit session is navigation state;
+`GET /farms/{farmId}` still revalidates friendship and remains authoritative.
+
+The card's visible CTA is intentionally the compact label `Visitar`; the actor
+is identified in the story text immediately above it. Event-card actions use a
+36-pixel minimum height by product decision, while preserving semantic buttons
+and visible keyboard focus.
+
+The visit state machine compares the requested farm with the active farm and
+does not start another request when they are equal. If a feed-originated visit
+is rejected with `403`, React invalidates the denied visit, restores the cached
+own-farm snapshot while `/farms/my` refreshes, synchronizes Phaser and presents
+contextual in-game feedback. Other request failures do not trigger automatic
+return to the player's farm and do not silently change the visit session. A
+transient failure preserves an existing snapshot and
+may recover on a later refresh; an initial failure without a snapshot may show
+the game's generic farm error state.
+
+Care, theft, and pest events remain separate stories. Passive visits are not
+recorded, the feed does not reveal ready crops, and opening, reading, or
+following an event grants no coins or XP.
+
+No analytics dependency is included in this prototype. Future instrumentation
+should preserve player privacy and distinguish at least these events:
+
+| Event | Purpose | Minimum non-sensitive context |
+| --- | --- | --- |
+| `events_feed_opened` | Measure feed discovery | active category, unread count |
+| `events_feed_cta_shown` | Establish the visit-action denominator | notification type, category |
+| `events_feed_visit_started` | Measure intent to return | notification type, source=`feed` |
+| `friend_visit_completed` | Confirm successful navigation | source, result |
+| `friend_visit_meaningful_interaction` | Measure useful visits | source, interaction kind |
+| `hud_shortcut_opened` | Detect HUD regressions | shortcut=`shop` or `inventory` |
+| `friendship_removed` | Monitor social friction after feed interactions | source, prior interaction kind |
+
+Instrumentation must not include notification message text, farm contents or
+ready-crop state. Opening, reading, clicking and visiting remain reward-free.
 
 ## Pest contract, time and concurrency
 

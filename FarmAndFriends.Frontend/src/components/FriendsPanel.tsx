@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSocial } from '../social/useSocial'
 import type { Friend } from '../types/Friend'
 import type { UserSearchResult } from '../types/Social'
+import { PlayerAvatar } from './PlayerAvatar'
 
 export type FriendsPanelTab = 'friends' | 'requests' | 'search'
 
@@ -17,7 +18,7 @@ type Feedback = {
 }
 
 const tabClass = (active: boolean) =>
-  `relative flex-1 rounded-lg px-2 py-2 text-sm font-semibold transition ${
+  `relative flex-1 rounded-lg px-2 py-2 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60 ${
     active
       ? 'bg-emerald-600 text-white shadow-sm'
       : 'text-emerald-700 hover:bg-emerald-100'
@@ -61,19 +62,44 @@ export function FriendsPanel({
   const [searchError, setSearchError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
+  const [pendingRemovalUserId, setPendingRemovalUserId] = useState<string | null>(null)
+  const [removingUserId, setRemovingUserId] = useState<string | null>(null)
+  const removalInFlightRef = useRef<string | null>(null)
+  const cancelRemovalButtonRef = useRef<HTMLButtonElement>(null)
+  const removalTriggerButtonRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
+    if (removalInFlightRef.current !== null) return
+
+    setPendingRemovalUserId(null)
     setTab(initialTab)
   }, [initialTab])
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Escape') return
+
+      if (pendingRemovalUserId) {
+        if (removalInFlightRef.current === null) setPendingRemovalUserId(null)
+        return
+      }
+
+      onClose()
     }
 
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [onClose])
+  }, [onClose, pendingRemovalUserId])
+
+  useEffect(() => {
+    if (pendingRemovalUserId) {
+      cancelRemovalButtonRef.current?.focus()
+      return
+    }
+
+    removalTriggerButtonRef.current?.focus()
+    removalTriggerButtonRef.current = null
+  }, [pendingRemovalUserId])
 
   useEffect(() => {
     if (!feedback) return
@@ -135,28 +161,65 @@ export function FriendsPanel({
   }
 
   function visitFriend(friend: Friend) {
+    if (removalInFlightRef.current !== null) return
+
     onVisitFriend(friend)
     onClose()
   }
 
-  function removeExistingFriend(friend: Friend) {
-    const confirmed = window.confirm(
-      `Deseja remover ${friend.username} da sua lista de amigos?`,
-    )
+  function changeTab(nextTab: FriendsPanelTab) {
+    if (removalInFlightRef.current !== null) return
 
-    if (!confirmed) return
-
-    void runAction(
-      `remove-${friend.userId}`,
-      () => removeFriend(friend.userId),
-      `${friend.username} foi removido da sua lista.`,
-    )
+    setPendingRemovalUserId(null)
+    setTab(nextTab)
   }
+
+  function closePanel() {
+    if (removalInFlightRef.current !== null) return
+    onClose()
+  }
+
+  function requestFriendRemoval(friend: Friend, triggerButton: HTMLButtonElement) {
+    if (removalInFlightRef.current !== null) return
+
+    removalTriggerButtonRef.current = triggerButton
+    setFeedback(null)
+    setPendingRemovalUserId(friend.userId)
+  }
+
+  function cancelFriendRemoval() {
+    if (removalInFlightRef.current !== null) return
+    setPendingRemovalUserId(null)
+  }
+
+  async function confirmFriendRemoval(friend: Friend) {
+    if (removalInFlightRef.current !== null) return
+
+    removalInFlightRef.current = friend.userId
+    setRemovingUserId(friend.userId)
+    setFeedback(null)
+
+    try {
+      await removeFriend(friend.userId)
+      setPendingRemovalUserId(null)
+      setFeedback({
+        type: 'success',
+        message: `${friend.username} foi removido da sua lista.`,
+      })
+    } catch (actionError) {
+      setFeedback({ type: 'error', message: getErrorMessage(actionError) })
+    } finally {
+      removalInFlightRef.current = null
+      setRemovingUserId(null)
+    }
+  }
+
+  const isFriendRemovalInFlight = removingUserId !== null
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 text-emerald-950"
-      onClick={onClose}
+      onClick={closePanel}
       onPointerDown={event => event.stopPropagation()}
     >
       <div
@@ -170,8 +233,9 @@ export function FriendsPanel({
           </div>
           <button
             type="button"
-            onClick={onClose}
-            className="rounded-full px-3 py-1 text-xl hover:bg-white/15"
+            onClick={closePanel}
+            disabled={isFriendRemovalInFlight}
+            className="rounded-full px-3 py-1 text-xl hover:bg-white/15 disabled:cursor-wait disabled:opacity-50"
             aria-label="Fechar painel de amigos"
           >
             ×
@@ -182,14 +246,16 @@ export function FriendsPanel({
           <button
             type="button"
             className={tabClass(tab === 'friends')}
-            onClick={() => setTab('friends')}
+            onClick={() => changeTab('friends')}
+            disabled={isFriendRemovalInFlight}
           >
             Amigos
           </button>
           <button
             type="button"
             className={tabClass(tab === 'requests')}
-            onClick={() => setTab('requests')}
+            onClick={() => changeTab('requests')}
+            disabled={isFriendRemovalInFlight}
           >
             Solicitações
             {incomingRequests.length > 0 && (
@@ -201,7 +267,8 @@ export function FriendsPanel({
           <button
             type="button"
             className={tabClass(tab === 'search')}
-            onClick={() => setTab('search')}
+            onClick={() => changeTab('search')}
+            disabled={isFriendRemovalInFlight}
           >
             Adicionar
           </button>
@@ -209,7 +276,8 @@ export function FriendsPanel({
 
         {feedback && (
           <div
-            role="status"
+            role={feedback.type === 'error' ? 'alert' : 'status'}
+            aria-live={feedback.type === 'error' ? 'assertive' : 'polite'}
             className={`mx-3 mt-3 rounded-lg border px-3 py-2 text-sm ${
               feedback.type === 'success'
                 ? 'border-emerald-300 bg-emerald-100 text-emerald-800'
@@ -239,51 +307,103 @@ export function FriendsPanel({
                   <p className="mt-2 font-semibold">Sua lista ainda está vazia.</p>
                   <button
                     type="button"
-                    onClick={() => setTab('search')}
+                    onClick={() => changeTab('search')}
                     className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700"
                   >
                     Encontrar amigos
                   </button>
                 </div>
               ) : (
-                friends.map(friend => (
-                  <div
-                    key={friend.userId}
-                    className="flex items-center gap-3 rounded-xl bg-white p-3 shadow-sm"
-                  >
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-200 font-bold text-emerald-800">
-                      {friend.avatarUrl ? (
-                        <img
-                          src={friend.avatarUrl}
-                          alt={friend.username}
-                          className="h-full w-full object-cover"
+                friends.map(friend => {
+                  const isConfirmingRemoval = pendingRemovalUserId === friend.userId
+                  const isRemoving = removingUserId === friend.userId
+
+                  return (
+                    <div
+                      key={friend.userId}
+                      className="rounded-xl bg-white p-3 shadow-sm"
+                    >
+                      <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
+                        <PlayerAvatar
+                          avatarId={friend.avatarId}
+                          alt={`Avatar de ${friend.username}`}
                         />
-                      ) : (
-                        friend.username.slice(0, 1).toUpperCase()
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold">{friend.username}</p>
+                          <p className="truncate text-sm text-emerald-600">{friend.farmName}</p>
+                        </div>
+                        <div className="flex w-full justify-end gap-2 sm:w-auto">
+                          <button
+                            type="button"
+                            onClick={() => visitFriend(friend)}
+                            disabled={isConfirmingRemoval || isFriendRemovalInFlight}
+                            className="min-h-11 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-50"
+                          >
+                            Visitar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={event => requestFriendRemoval(friend, event.currentTarget)}
+                            disabled={isConfirmingRemoval || isFriendRemovalInFlight}
+                            className="min-h-11 rounded-lg px-2 py-2 text-sm text-red-600 hover:bg-red-50 disabled:cursor-wait disabled:opacity-50"
+                            aria-label={`Remover ${friend.username}`}
+                            aria-expanded={isConfirmingRemoval}
+                            aria-controls={isConfirmingRemoval
+                              ? `remove-friend-confirmation-${friend.userId}`
+                              : undefined}
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      </div>
+
+                      {isConfirmingRemoval && (
+                        <div
+                          id={`remove-friend-confirmation-${friend.userId}`}
+                          role="group"
+                          aria-busy={isRemoving}
+                          aria-labelledby={`remove-friend-title-${friend.userId}`}
+                          aria-describedby={`remove-friend-description-${friend.userId}`}
+                          className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3"
+                        >
+                          <p
+                            id={`remove-friend-title-${friend.userId}`}
+                            className="text-sm font-bold text-red-800"
+                          >
+                            Remover amizade?
+                          </p>
+                          <p
+                            id={`remove-friend-description-${friend.userId}`}
+                            className="mt-1 text-sm text-red-700"
+                          >
+                            Deseja remover {friend.username} da sua lista de amigos?
+                          </p>
+                          <div className="mt-3 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                            <button
+                              ref={cancelRemovalButtonRef}
+                              type="button"
+                              onClick={cancelFriendRemoval}
+                              disabled={isRemoving}
+                              aria-describedby={`remove-friend-description-${friend.userId}`}
+                              className="min-h-11 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-yellow-300 disabled:cursor-wait disabled:opacity-50"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void confirmFriendRemoval(friend)}
+                              disabled={isRemoving}
+                              aria-describedby={`remove-friend-description-${friend.userId}`}
+                              className="min-h-11 rounded-lg border border-red-700 bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-yellow-300 disabled:cursor-wait disabled:opacity-50"
+                            >
+                              {isRemoving ? 'Removendo...' : 'Sim, remover'}
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold">{friend.username}</p>
-                      <p className="truncate text-sm text-emerald-600">{friend.farmName}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => visitFriend(friend)}
-                      className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-                    >
-                      Visitar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeExistingFriend(friend)}
-                      disabled={busyAction === `remove-${friend.userId}`}
-                      className="rounded-lg px-2 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
-                      aria-label={`Remover ${friend.username}`}
-                    >
-                      Remover
-                    </button>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
           ) : tab === 'requests' ? (
@@ -431,7 +551,7 @@ export function FriendsPanel({
                         ) : incoming ? (
                           <button
                             type="button"
-                            onClick={() => setTab('requests')}
+                            onClick={() => changeTab('requests')}
                             className="rounded-lg bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-800"
                           >
                             Responder convite

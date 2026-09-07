@@ -822,6 +822,13 @@ namespace FarmAndFriends.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AvatarId")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("avatar-1");
+
                     b.Property<int>("CurrentXp")
                         .HasColumnType("integer");
 

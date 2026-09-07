@@ -67,6 +67,11 @@ public class AppDbContext : DbContext
         
         modelBuilder.Entity<User>(entity =>
         {
+            entity.Property(u => u.AvatarId)
+                .HasMaxLength(32)
+                .IsRequired()
+                .HasDefaultValue(Domain.Rules.ProfileAvatarRules.DefaultAvatarId);
+
             entity.Property(u => u.Level)
                 .HasDefaultValue(1);
 

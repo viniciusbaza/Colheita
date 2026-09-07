@@ -18,6 +18,13 @@ type Feedback = {
   type: 'success' | 'error'
 }
 
+type PlayerSummaryProps = {
+  coins: number | null
+  premiumCoins: number | null
+  className: string
+  layout?: 'inline' | 'stacked'
+}
+
 const numberFormatter = new Intl.NumberFormat('pt-BR')
 
 function tabButtonClass(active: boolean) {
@@ -26,6 +33,47 @@ function tabButtonClass(active: boolean) {
       ? 'bg-emerald-600 text-white shadow-sm'
       : 'text-emerald-700 hover:bg-emerald-100'
   }`
+}
+
+function PlayerSummary({
+  coins,
+  premiumCoins,
+  className,
+  layout = 'inline',
+}: PlayerSummaryProps) {
+  const cardClassName = `flex min-w-0 flex-1 rounded-lg border px-2.5 py-1.5 sm:min-w-44 sm:flex-none ${
+    layout === 'stacked'
+      ? 'flex-col items-start gap-0.5'
+      : 'items-center justify-between gap-2'
+  }`
+  const valueClassName = `font-bold sm:text-base ${
+    layout === 'stacked'
+      ? 'max-w-full break-all text-sm leading-tight'
+      : 'whitespace-nowrap'
+  }`
+
+  return (
+    <section aria-label="Resumo do jogador" className={className}>
+      <div className={`${cardClassName} border-amber-200 bg-amber-50`}>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 sm:text-xs">
+          Moedas
+        </p>
+        <p className={`${valueClassName} text-amber-900`}>
+          🪙 {coins === null ? '—' : numberFormatter.format(coins)}
+        </p>
+      </div>
+      <div className={`${cardClassName} border-pink-200 bg-pink-50`}>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-pink-700 sm:text-xs">
+          Notas
+        </p>
+        <p className={`${valueClassName} text-pink-900`}>
+          💵 {premiumCoins === null
+            ? '—'
+            : numberFormatter.format(premiumCoins)}
+        </p>
+      </div>
+    </section>
+  )
 }
 
 export function ShopPanel({ onClose }: Props) {
@@ -102,6 +150,11 @@ export function ShopPanel({ onClose }: Props) {
               Compre sementes e venda o resultado da sua colheita
             </p>
           </div>
+          <PlayerSummary
+            coins={inventory?.coins ?? null}
+            premiumCoins={inventory?.premiumCoins ?? null}
+            className="hidden flex-wrap gap-0.5 sm:flex max-sm:landscape:flex"
+          />
           <button
             type="button"
             onClick={onClose}
@@ -112,27 +165,12 @@ export function ShopPanel({ onClose }: Props) {
           </button>
         </header>
 
-        <section
-          aria-label="Resumo do jogador"
-          className="flex flex-wrap gap-2 border-b border-emerald-200 bg-white/70 px-3 py-2"
-        >
-          <div className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 sm:min-w-44 sm:flex-none">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700 sm:text-xs">
-              Moedas
-            </p>
-            <p className="whitespace-nowrap font-bold text-amber-900 sm:text-base">
-              🪙 {inventory ? numberFormatter.format(inventory.coins) : '—'}
-            </p>
-          </div>
-          <div className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-pink-200 bg-pink-50 px-2.5 py-1.5 sm:min-w-44 sm:flex-none">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-pink-700 sm:text-xs">
-              Premium
-            </p>
-            <p className="whitespace-nowrap font-bold text-pink-900 sm:text-base">
-              💎 {inventory ? numberFormatter.format(inventory.premiumCoins) : '—'}
-            </p>
-          </div>
-        </section>
+        <PlayerSummary
+          coins={inventory?.coins ?? null}
+          premiumCoins={inventory?.premiumCoins ?? null}
+          className="flex gap-2 border-b border-emerald-200 bg-white/70 px-3 py-2 sm:hidden max-sm:landscape:hidden"
+          layout="stacked"
+        />
 
         <nav
           aria-label="Ações da loja"
@@ -150,7 +188,7 @@ export function ShopPanel({ onClose }: Props) {
             onClick={() => setTab('sell')}
             className={tabButtonClass(tab === 'sell')}
           >
-            🧺 Vender colheita
+            🧺 Vender
             {cropUnits > 0 && (
               <span
                 className={`ml-1 inline-flex min-w-5 justify-center rounded-full px-1 text-xs ${

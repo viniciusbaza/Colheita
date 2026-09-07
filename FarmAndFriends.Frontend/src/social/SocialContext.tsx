@@ -12,6 +12,8 @@ export type SocialContextValue = {
   outgoingRequests: FriendRequest[]
   notifications: SocialNotification[]
   unreadCount: number
+  hasMoreNotifications: boolean
+  loadingMoreNotifications: boolean
   loading: boolean
   error: string | null
   toastNotification: SocialNotification | null
@@ -24,6 +26,7 @@ export type SocialContextValue = {
   removeFriend: (friendUserId: string) => Promise<void>
   markNotificationAsRead: (notificationId: string) => Promise<void>
   markAllNotificationsAsRead: () => Promise<void>
+  loadMoreNotifications: () => Promise<void>
   dismissToast: () => void
 }
 

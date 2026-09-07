@@ -7,6 +7,8 @@ function createUser(overrides: Partial<User> = {}): User {
   return {
     id: 'user-id',
     username: 'farmer',
+    farmId: 'farm-id',
+    farmName: 'Fazenda Feliz',
     level: 1,
     currentXp: 10,
     xpToNextLevel: 100,

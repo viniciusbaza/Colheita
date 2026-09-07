@@ -4,6 +4,9 @@ public class MeResponseDto
 {
     public Guid Id { get; set; }
     public string Username { get; set; } = null!;
+    public string AvatarId { get; set; } = null!;
+    public Guid FarmId { get; set; }
+    public string FarmName { get; set; } = null!;
 
     public int Level { get; set; }
     public int CurrentXp { get; set; }

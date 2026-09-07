@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { loginRequest } from '../api/auth'
 import { useAuth } from '../auth/useAuth'
 import { AuthShell } from '../components/AuthShell'
-import readyTomato from '../game/assets/tiles/ready/tomato.png'
+import farmScene from '../game/assets/environment/farm-clearing.png'
 
 type RegistrationNavigationState = {
   registered: true
@@ -148,7 +148,7 @@ export default function Login() {
   }
 
   return (
-    <AuthShell illustrationSrc={readyTomato}>
+    <AuthShell illustrationSrc={farmScene}>
       <div className="auth-panel">
         <p className="auth-kicker">A porteira está aberta</p>
         <h1 className="auth-title">Bem vindo de volta</h1>

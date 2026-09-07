@@ -13,6 +13,12 @@ import type {
   SocialNotification,
   UserSearchResult,
 } from '../types/Social'
+import { mergeNotificationFeedItems } from '../utils/notificationFeed'
+import {
+  advanceAsyncSession,
+  isAsyncSessionCurrent,
+  type AsyncSession,
+} from './asyncSession'
 import { SocialContext } from './SocialContext'
 
 const POLLING_INTERVAL_MS = 30_000
@@ -39,14 +45,26 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([])
   const [notifications, setNotifications] = useState<SocialNotification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [hasMoreNotifications, setHasMoreNotifications] = useState(false)
+  const [loadingMoreNotifications, setLoadingMoreNotifications] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [toastNotification, setToastNotification] =
     useState<SocialNotification | null>(null)
   const toastedNotificationIds = useRef(readToastedNotificationIds())
   const refreshInProgress = useRef<Promise<void> | null>(null)
+  const nextNotificationCursor = useRef<string | null>(null)
+  const loadedAdditionalFeedPages = useRef(false)
+  const loadMoreInProgress = useRef<Promise<void> | null>(null)
+  const activeSession = useRef<AsyncSession>({ token, generation: 0 })
+  activeSession.current = advanceAsyncSession(activeSession.current, token)
+  const [dataSession, setDataSession] = useState(activeSession.current)
 
-  const registerNotifications = useCallback((next: SocialNotification[]) => {
+  const registerFirstFeedPage = useCallback((
+    next: SocialNotification[],
+    nextCursor: string | null,
+    windowStartUtc: string,
+  ) => {
     const unseenNotifications = next.filter(
       notification =>
         notification.readAt == null &&
@@ -70,11 +88,21 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       setToastNotification(nextToast)
     }
 
-    setNotifications(next)
+    setNotifications(current =>
+      mergeNotificationFeedItems(current, next, windowStartUtc),
+    )
+
+    if (!loadedAdditionalFeedPages.current) {
+      nextNotificationCursor.current = nextCursor
+      setHasMoreNotifications(nextCursor != null)
+    }
   }, [])
 
   const refreshSocial = useCallback(async () => {
     if (!token) return
+
+    const session = activeSession.current
+    if (session.token !== token) return
 
     if (refreshInProgress.current) {
       return refreshInProgress.current
@@ -86,43 +114,61 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
           nextFriends,
           nextIncoming,
           nextOutgoing,
-          nextNotifications,
-          unread,
+          nextFeed,
         ] = await Promise.all([
           socialApi.getFriends(),
           socialApi.getIncomingFriendRequests(),
           socialApi.getOutgoingFriendRequests(),
-          socialApi.getNotifications(false, 50),
-          socialApi.getUnreadNotificationCount(),
+          socialApi.getNotificationFeed(undefined, 50),
         ])
 
+        if (!isAsyncSessionCurrent(activeSession.current, session)) return
+
+        setDataSession(session)
         setFriends(nextFriends)
         setIncomingRequests(nextIncoming)
         setOutgoingRequests(nextOutgoing)
-        registerNotifications(nextNotifications)
-        setUnreadCount(unread.count)
+        registerFirstFeedPage(
+          nextFeed.items,
+          nextFeed.nextCursor,
+          nextFeed.windowStartUtc,
+        )
+        setUnreadCount(nextFeed.unreadCount)
         setError(null)
       } catch (refreshError) {
-        setError(getErrorMessage(refreshError))
+        if (isAsyncSessionCurrent(activeSession.current, session)) {
+          setError(getErrorMessage(refreshError))
+        }
         throw refreshError
       } finally {
-        setLoading(false)
-        refreshInProgress.current = null
+        if (isAsyncSessionCurrent(activeSession.current, session)) {
+          setLoading(false)
+          refreshInProgress.current = null
+        }
       }
     })()
 
     refreshInProgress.current = refresh
     return refresh
-  }, [registerNotifications, token])
+  }, [registerFirstFeedPage, token])
 
   useEffect(() => {
+    setDataSession(activeSession.current)
+    setFriends([])
+    setIncomingRequests([])
+    setOutgoingRequests([])
+    setNotifications([])
+    setUnreadCount(0)
+    nextNotificationCursor.current = null
+    loadedAdditionalFeedPages.current = false
+    setHasMoreNotifications(false)
+    setLoadingMoreNotifications(false)
+    setToastNotification(null)
+    setError(null)
+    refreshInProgress.current = null
+    loadMoreInProgress.current = null
+
     if (!token) {
-      setFriends([])
-      setIncomingRequests([])
-      setOutgoingRequests([])
-      setNotifications([])
-      setUnreadCount(0)
-      setToastNotification(null)
       setLoading(false)
       return
     }
@@ -147,6 +193,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       window.clearInterval(intervalId)
       window.removeEventListener('focus', refreshWhenVisible)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
+      refreshInProgress.current = null
+      loadMoreInProgress.current = null
     }
   }, [refreshSocial, token])
 
@@ -157,6 +205,53 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       // The mutation already succeeded; the next poll will reconcile the UI.
     }
   }, [refreshSocial])
+
+  const loadMoreNotifications = useCallback(async () => {
+    if (!token || !nextNotificationCursor.current) return
+
+    const session = activeSession.current
+    if (session.token !== token) return
+
+    if (loadMoreInProgress.current) {
+      return loadMoreInProgress.current
+    }
+
+    const cursor = nextNotificationCursor.current
+    const loadMore = (async () => {
+      setLoadingMoreNotifications(true)
+
+      try {
+        const nextFeed = await socialApi.getNotificationFeed(cursor, 50)
+        if (!isAsyncSessionCurrent(activeSession.current, session)) return
+
+        loadedAdditionalFeedPages.current = true
+        nextNotificationCursor.current = nextFeed.nextCursor
+        setHasMoreNotifications(nextFeed.nextCursor != null)
+        setUnreadCount(nextFeed.unreadCount)
+        setNotifications(current =>
+          mergeNotificationFeedItems(
+            current,
+            nextFeed.items,
+            nextFeed.windowStartUtc,
+          ),
+        )
+        setError(null)
+      } catch (loadError) {
+        if (isAsyncSessionCurrent(activeSession.current, session)) {
+          setError(getErrorMessage(loadError))
+        }
+        throw loadError
+      } finally {
+        if (isAsyncSessionCurrent(activeSession.current, session)) {
+          setLoadingMoreNotifications(false)
+          loadMoreInProgress.current = null
+        }
+      }
+    })()
+
+    loadMoreInProgress.current = loadMore
+    return loadMore
+  }, [token])
 
   const searchUsers = useCallback((query: string): Promise<UserSearchResult[]> => {
     return socialApi.searchUsers(query)
@@ -188,7 +283,10 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
   }, [refreshAfterMutation])
 
   const markNotificationAsRead = useCallback(async (notificationId: string) => {
+    const session = activeSession.current
     await socialApi.markNotificationAsRead(notificationId)
+    if (!isAsyncSessionCurrent(activeSession.current, session)) return
+
     const readAt = new Date().toISOString()
     setNotifications(current =>
       current.map(notification =>
@@ -201,7 +299,9 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const markAllNotificationsAsRead = useCallback(async () => {
+    const session = activeSession.current
     await socialApi.markAllNotificationsAsRead()
+    if (!isAsyncSessionCurrent(activeSession.current, session)) return
 
     const readAt = new Date().toISOString()
     setNotifications(current =>
@@ -218,15 +318,23 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     setToastNotification(null)
   }, [])
 
+  const hasCurrentSessionData = isAsyncSessionCurrent(
+    activeSession.current,
+    dataSession,
+  )
+
   const value = useMemo(() => ({
-    friends,
-    incomingRequests,
-    outgoingRequests,
-    notifications,
-    unreadCount,
-    loading,
-    error,
-    toastNotification,
+    friends: hasCurrentSessionData ? friends : [],
+    incomingRequests: hasCurrentSessionData ? incomingRequests : [],
+    outgoingRequests: hasCurrentSessionData ? outgoingRequests : [],
+    notifications: hasCurrentSessionData ? notifications : [],
+    unreadCount: hasCurrentSessionData ? unreadCount : 0,
+    hasMoreNotifications: hasCurrentSessionData && hasMoreNotifications,
+    loadingMoreNotifications:
+      hasCurrentSessionData && loadingMoreNotifications,
+    loading: token ? !hasCurrentSessionData || loading : false,
+    error: hasCurrentSessionData ? error : null,
+    toastNotification: hasCurrentSessionData ? toastNotification : null,
     refreshSocial,
     searchUsers,
     sendRequest,
@@ -236,6 +344,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     removeFriend,
     markNotificationAsRead,
     markAllNotificationsAsRead,
+    loadMoreNotifications,
     dismissToast,
   }), [
     acceptRequest,
@@ -244,8 +353,12 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     dismissToast,
     error,
     friends,
+    hasCurrentSessionData,
+    hasMoreNotifications,
     incomingRequests,
     loading,
+    loadingMoreNotifications,
+    loadMoreNotifications,
     markNotificationAsRead,
     markAllNotificationsAsRead,
     notifications,
@@ -255,6 +368,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     searchUsers,
     sendRequest,
     toastNotification,
+    token,
     unreadCount,
   ])
 

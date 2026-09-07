@@ -86,6 +86,9 @@ export function InventoryPanel({ onClose }: Props) {
             <p className="text-xs text-emerald-100">
               Confira tudo o que você guardou na fazenda
             </p>
+            <p className="text-xs text-emerald-100">
+              🪙 {inventory ? numberFormatter.format(inventory.coins) : '—'} 💵 {inventory ? numberFormatter.format(inventory.premiumCoins) : '—'}
+            </p>
           </div>
           <button
             type="button"
@@ -96,28 +99,6 @@ export function InventoryPanel({ onClose }: Props) {
             ×
           </button>
         </header>
-
-        <section
-          aria-label="Saldos"
-          className="grid grid-cols-2 gap-2 border-b border-emerald-200 bg-white/70 p-3"
-        >
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-              Moedas
-            </p>
-            <p className="mt-1 text-lg font-bold text-amber-900">
-              🪙 {inventory ? numberFormatter.format(inventory.coins) : '—'}
-            </p>
-          </div>
-          <div className="rounded-xl border border-pink-200 bg-pink-50 px-3 py-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-pink-700">
-              Premium
-            </p>
-            <p className="mt-1 text-lg font-bold text-pink-900">
-              💎 {inventory ? numberFormatter.format(inventory.premiumCoins) : '—'}
-            </p>
-          </div>
-        </section>
 
         <nav
           aria-label="Filtrar inventário"

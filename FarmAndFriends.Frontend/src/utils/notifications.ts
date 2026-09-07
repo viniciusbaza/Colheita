@@ -19,7 +19,7 @@ export function getNotificationTitle(notification: SocialNotification) {
     case NotificationType.PestProtectionApplied:
       return 'Lote protegido'
     default:
-      return 'Nova notificação'
+      return 'Novo acontecimento'
   }
 }
 
@@ -64,12 +64,12 @@ export function getNotificationMessage(notification: SocialNotification) {
     case NotificationType.CropCaredFor:
       return `${actor} cuidou de uma plantação na sua fazenda.`
     case NotificationType.PestConsumed:
-      return 'Uma lagarta comeu parte de uma colheita da sua fazenda.'
+      return 'Uma lagarta atacou sua plantação e parte da colheita foi perdida.'
     case NotificationType.PestRemoved:
       return `${actor} removeu uma lagarta da sua plantação.`
     case NotificationType.PestProtectionApplied:
       return `${actor} protegeu um lote da sua fazenda contra pragas.`
     default:
-      return 'Você recebeu uma nova notificação.'
+      return 'Um novo acontecimento foi registrado.'
   }
 }

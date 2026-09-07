@@ -6,6 +6,7 @@ public class User
     public string Username { get; set; } = null!;
     public string NormalizedUsername { get; set; } = null!;
     public string PasswordHash { get; set; } = null!;
+    public string AvatarId { get; set; } = Rules.ProfileAvatarRules.DefaultAvatarId;
     public ICollection<Farm> Farms { get; set; } = new List<Farm>();
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
     public int Level { get; set; } = 1;

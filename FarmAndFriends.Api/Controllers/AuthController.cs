@@ -124,17 +124,18 @@ public class AuthController : ControllerBase
 
         user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
 
-        if (string.IsNullOrWhiteSpace(request.FarmName))
+        var farmName = FarmNameRules.Normalize(request.FarmName);
+        if (farmName == null)
             return BadRequest("Nome da fazenda é obrigatório");
         
-        if (request.FarmName.Length > 30)
+        if (farmName.Length > FarmNameRules.MaxLength)
             return BadRequest("Nome da fazenda muito longo");
 
         // 🏡 Criar Farm inicial
         var farm = new Farm
         {
             Id = Guid.NewGuid(),
-            Name = request.FarmName,
+            Name = farmName,
             UserId = user.Id
         };
 

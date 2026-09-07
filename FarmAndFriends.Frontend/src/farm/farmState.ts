@@ -32,6 +32,30 @@ export type PestRemovalAttempt = {
   key: string
 }
 
+type FarmVisitState = {
+  mode: 'OWN' | 'VISITING'
+  farmId: string
+}
+
+export function getFarmVisitDecision(
+  currentSession: FarmVisitState,
+  requestedFarmId: string,
+  currentFarmId: string | null,
+  loading: boolean,
+) {
+  const isSameVisit = (
+    currentSession.mode === 'VISITING'
+    && currentSession.farmId === requestedFarmId
+  )
+
+  if (!isSameVisit) return 'start' as const
+
+  const isVisitAlreadyLoaded = currentFarmId === requestedFarmId
+  return isVisitAlreadyLoaded || loading
+    ? 'ignore' as const
+    : 'retry' as const
+}
+
 export function patchFarmPlot(
   farm: Farm,
   plotId: string,
@@ -48,6 +72,15 @@ export function patchFarmPlot(
   plots[plotIndex] = { ...currentPlot, ...patch }
 
   return { ...farm, plots }
+}
+
+export function patchFarmName(
+  farm: Farm | null,
+  farmId: string,
+  name: string,
+) {
+  if (!farm || farm.id !== farmId || farm.name === name) return farm
+  return { ...farm, name }
 }
 
 export function confirmedTheftPatch(

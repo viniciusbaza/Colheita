@@ -55,3 +55,10 @@ export type SocialNotification = {
 export type UnreadCountResponse = {
   count: number
 }
+
+export type NotificationFeedResponse = {
+  items: SocialNotification[]
+  nextCursor: string | null
+  windowStartUtc: string
+  unreadCount: number
+}

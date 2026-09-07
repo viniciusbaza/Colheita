@@ -47,7 +47,8 @@ public class FriendsController : ControllerBase
                 user.Id,
                 user.Username,
                 farm.Id,
-                farm.Name)
+                farm.Name,
+                user.AvatarId)
         ).ToListAsync();
 
         return Ok(friends);

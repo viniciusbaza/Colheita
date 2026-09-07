@@ -280,7 +280,7 @@ public sealed class BaselineMigrationTests
                 (await context.Database.GetAppliedMigrationsAsync())
                 .ToArray());
             Assert.Equal(
-                ["20260828041558_RepairTomatoMultiHarvestConfiguration"],
+                context.Database.GetMigrations().Skip(2).ToArray(),
                 (await context.Database.GetPendingMigrationsAsync())
                 .ToArray());
 
@@ -319,7 +319,7 @@ public sealed class BaselineMigrationTests
         var availableMigrations = context.Database
             .GetMigrations()
             .ToArray();
-        Assert.Equal(3, availableMigrations.Length);
+        Assert.Equal(4, availableMigrations.Length);
         Assert.Equal(
             "20260818050938_InitialCreate",
             availableMigrations[0]);
@@ -327,6 +327,7 @@ public sealed class BaselineMigrationTests
         Assert.EndsWith(
             "_RepairTomatoMultiHarvestConfiguration",
             availableMigrations[2]);
+        Assert.EndsWith("_AddUserAvatar", availableMigrations[3]);
         Assert.Equal(
             availableMigrations,
             (await context.Database.GetAppliedMigrationsAsync()).ToArray());
@@ -649,6 +650,7 @@ public sealed class BaselineMigrationTests
         return column.DefaultValue switch
         {
             null => "none",
+            string value => $"'{value.Replace("'", "''")}'::{Regex.Replace(column.StoreType, @"\(\d+\)", string.Empty)}",
             Enum value => Convert.ToInt64(value, CultureInfo.InvariantCulture)
                 .ToString(CultureInfo.InvariantCulture),
             bool value => value ? "true" : "false",

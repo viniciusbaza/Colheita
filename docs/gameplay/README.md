@@ -14,7 +14,7 @@ Proposed mechanics must not be added here until they are approved.
 
 Status: Active
 
-Last reviewed: 2026-08-11
+Last reviewed: 2026-09-05
 
 Maintainers:
 
@@ -327,6 +327,44 @@ The friends list must not directly reveal which friends have ready crops.
 The player visits to discover the current farm state.
 
 A visit should eventually remain meaningful even when no theft is available.
+
+## Farm events and social return
+
+The player-facing **Acontecimentos** feed keeps up to seven days of stories
+about the player's farm and friendships. Reading an event marks it as seen but
+does not remove it from the history.
+
+The feed is divided into:
+
+* **Sua fazenda** for care, theft, caterpillar consumption, pest removal and
+  protection;
+* **Amizades** for received, accepted and declined friend requests;
+* **Novos** and **Já vistos** inside each category.
+
+Care and protection must remain visually and semantically separate from theft.
+Theft uses neutral language: the feed must not offer revenge, urgency, a return
+bonus or pressure to reciprocate.
+
+An attributed care, pest removal, pest protection, theft or accepted-friendship
+event may offer the visible action **Visitar** only while the actor is still an
+accepted friend. The actor's name is already present in the event text, so it
+is intentionally not repeated in the button. Pending received requests use
+**Ver solicitações** instead. Automatic events without an actor and declined
+requests have no visit action.
+
+The compact event-card actions intentionally use a 36-pixel minimum height.
+This is a deliberate exception to the larger HUD shortcuts and was accepted
+for this dense secondary panel. Keyboard focus must remain visible.
+
+Following an event is navigation only. The farm endpoint revalidates access;
+the client cannot use the feed as authorization. If the requested farm is
+already active, the visit transition is ignored so loading does not restart.
+If the server denies a visit because the friendship changed, the game returns
+to the player's own farm and shows safe in-game feedback.
+
+Passive visits are not recorded. The feed does not reveal ready crops or the
+friend's current farm state. Opening, reading, following an event or returning
+to a friend grants no coins or XP.
 
 ## Plot care 1
 
@@ -679,6 +717,7 @@ The game currently includes:
 * player XP and levels;
 * friends panel;
 * farm visits;
+* seven-day Acontecimentos feed;
 * crop theft;
 * RemainingYield;
 * plot care;

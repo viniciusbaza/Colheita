@@ -2,6 +2,7 @@ import { authFetch } from './http'
 import type { Friend } from '../types/Friend'
 import type {
   FriendRequest,
+  NotificationFeedResponse,
   SocialNotification,
   UnreadCountResponse,
   UserSearchResult,
@@ -76,6 +77,18 @@ export function getUnreadNotificationCount() {
   return authFetch<UnreadCountResponse>('/notifications/unread-count')
 }
 
+export function getNotificationFeed(cursor?: string, take = 50) {
+  const params = new URLSearchParams({ take: String(take) })
+
+  if (cursor) {
+    params.set('cursor', cursor)
+  }
+
+  return authFetch<NotificationFeedResponse>(
+    `/notifications/feed?${params.toString()}`,
+  )
+}
+
 export function markNotificationAsRead(notificationId: string) {
   return authFetch<void>(`/notifications/${notificationId}/read`, {
     method: 'PATCH',
@@ -83,7 +96,7 @@ export function markNotificationAsRead(notificationId: string) {
 }
 
 export function markAllNotificationsAsRead() {
-  return authFetch<void>('/notifications/read-all', {
+  return authFetch<void>('/notifications/feed/read-all', {
     method: 'PATCH',
   })
 }

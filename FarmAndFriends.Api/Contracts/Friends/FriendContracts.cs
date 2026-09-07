@@ -13,7 +13,8 @@ public record FriendResponse(
     Guid UserId,
     string Username,
     Guid FarmId,
-    string FarmName
+    string FarmName,
+    string AvatarId
 );
 
 public record FriendRequestResponse(

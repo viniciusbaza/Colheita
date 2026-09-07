@@ -4,9 +4,11 @@ import {
   confirmedHarvestPatch,
   confirmedPestRemovalPatch,
   confirmedTheftPatch,
+  getFarmVisitDecision,
   getHarvestCyclePrecondition,
   getPestRemovalAttempt,
   isCurrentFarmRequest,
+  patchFarmName,
   patchFarmPlot,
 } from '../src/farm/farmState.ts'
 import type {
@@ -52,6 +54,15 @@ const farm: Farm = {
   landOffer: null,
   plots: [activePlot],
 }
+
+test('patches only the matching farm name and preserves other farm snapshots', () => {
+  const renamed = patchFarmName(farm, 'farm-1', 'Recanto Verde')
+  assert.notEqual(renamed, farm)
+  assert.equal(renamed?.name, 'Recanto Verde')
+  assert.equal(farm.name, 'Fazenda')
+  assert.equal(patchFarmName(farm, 'friend-farm', 'Nome indevido'), farm)
+  assert.equal(patchFarmName(null, 'farm-1', 'Recanto Verde'), null)
+})
 
 test('patches a plot from confirmed pest action fields without mutating the snapshot', () => {
   const removedPest = {
@@ -298,5 +309,65 @@ test('only the newest farm request may commit its response', () => {
       'VISITING:new-farm',
     ),
     false,
+  )
+})
+
+test('ignores a visit to the farm already being visited', () => {
+  assert.equal(
+    getFarmVisitDecision(
+      { mode: 'VISITING', farmId: 'friend-farm' },
+      'friend-farm',
+      'friend-farm',
+      false,
+    ),
+    'ignore',
+  )
+})
+
+test('does not restart the same visit while it is loading', () => {
+  assert.equal(
+    getFarmVisitDecision(
+      { mode: 'VISITING', farmId: 'friend-farm' },
+      'friend-farm',
+      null,
+      true,
+    ),
+    'ignore',
+  )
+})
+
+test('restarts the same visit after a transient loading failure', () => {
+  assert.equal(
+    getFarmVisitDecision(
+      { mode: 'VISITING', farmId: 'friend-farm' },
+      'friend-farm',
+      null,
+      false,
+    ),
+    'retry',
+  )
+})
+
+test('starts a visit when the requested farm differs from the active visit', () => {
+  assert.equal(
+    getFarmVisitDecision(
+      { mode: 'VISITING', farmId: 'first-friend-farm' },
+      'second-friend-farm',
+      'first-friend-farm',
+      false,
+    ),
+    'start',
+  )
+})
+
+test('starts a visit from the player own farm', () => {
+  assert.equal(
+    getFarmVisitDecision(
+      { mode: 'OWN', farmId: 'my' },
+      'friend-farm',
+      'my-farm-id',
+      false,
+    ),
+    'start',
   )
 })

@@ -133,6 +133,12 @@
   }
 }
 
+@media (min-width: 40rem) and (max-height: 43.75rem) {
+  .plot-modal {
+    width: 18rem;
+  }
+}
+
 /* Primeiro contato: cadastro e login */
 .auth-page {
   --auth-cream: #fffdf3;

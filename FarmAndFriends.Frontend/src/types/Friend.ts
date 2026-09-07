@@ -4,4 +4,5 @@ export type Friend = {
   farmId: string
   farmName: string
   avatarUrl?: string
+  avatarId?: string | null
 }

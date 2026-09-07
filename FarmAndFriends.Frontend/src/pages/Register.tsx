@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { registerRequest } from '../api/auth'
 import { AuthShell } from '../components/AuthShell'
 import plotGrowing from '../game/assets/tiles/plot-growing.png'
-import readyTomato from '../game/assets/tiles/ready/tomato.png'
+import apple_tree from '../game/assets/crops/mature/apple_tree.png'
 
 type RegisterField =
   | 'username'
@@ -198,7 +198,7 @@ export default function Register() {
               <span className="auth-leaf auth-leaf-two">🍃</span>
               <span className="auth-leaf auth-leaf-three">🍃</span>
               <img
-                src={readyTomato}
+                src={apple_tree}
                 alt=""
                 className="auth-success-illustration"
               />
