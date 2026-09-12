@@ -1,0 +1,3 @@
+interface:
+  display_name: "Change API Contract"
+  short_description: "Synchronize API contracts and consumers"

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Backend Gameplay Mutation"
+  short_description: "Protect authoritative backend mutations"

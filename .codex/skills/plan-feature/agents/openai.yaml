@@ -1,0 +1,3 @@
+interface:
+  display_name: "Plan Feature"
+  short_description: "Create implementation-ready feature plans"

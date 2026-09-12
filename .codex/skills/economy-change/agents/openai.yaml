@@ -1,0 +1,3 @@
+interface:
+  display_name: "Economy Change"
+  short_description: "Evaluate safe economy changes"
